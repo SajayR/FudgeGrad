@@ -37,38 +37,37 @@ class Tensor():
             return Tensor(value=self.data*multiplicand.data, parents=parents, gen_op="mul", requires_grad=(self.requires_grad or multiplicand.requires_grad))
         else:
             parents=(self, multiplicand)
-            return Tensor(value=self.data*multiplicand, parents=parents, gen_op="mul", requires_grad=self.requires_grad)
+            return Tensor(value=self.data*multiplicand, parents=parents, gen_op="scaler_mul", requires_grad=self.requires_grad)
         
     """Grad Operations"""
     def _add_backward(self, alt_parents: tuple, parent: "Tensor", forward_grad: "Tensor"):
         return forward_grad
     
     def _mul_backward(self, alt_parents: tuple, parent: "Tensor", forward_grad: "Tensor"):
+        assert isinstance(alt_parents[0], Tensor)
         return alt_parents[0] * forward_grad
+
+    def _scaler_mul_backward(self, alt_parents: tuple, parent: "Tensor", forward_grad: "Tensor"):
+        scaler=float(alt_parents[0])
+        return forward_grad*scaler
         
     def _grad(self, forward_grad: "Tensor"=None): 
         assert self.requires_grad, 'Grad is not enabled for this tensor'
         backward_op = f"_{self.gen_op.lower()}_backward"
-        print(f"Backward op {backward_op}")
         if forward_grad is None:
-            for i, parent in enumerate(self.parents):   
-                self.parents[i].grad += getattr(self, backward_op)(alt_parents=(self.parents[:i]+self.parents[i+1:]), parent=self.parents[i], forward_grad=Tensor(value=np.ones(self.shape)))
+            for i, parent in enumerate([p for p in self.parents if isinstance(p, Tensor)]) :   
+                self.parents[i].grad += getattr(self, backward_op)(alt_parents=(tuple(self.parents[:i]+self.parents[i+1:])), parent=self.parents[i], forward_grad=Tensor(value=np.ones(self.shape)))
                 if self.parents[i].gen_op is not None:
                     self.parents[i]._grad(self.parents[i].grad)
         else:
-            for i, parent in enumerate(self.parents):   
-                self.parents[i].grad += getattr(self, backward_op)(alt_parents=(self.parents[:i]+self.parents[i+1:]), parent=self.parents[i], forward_grad=forward_grad)
+            for i, parent in enumerate([p for p in self.parents if isinstance(p, Tensor)]):   
+                self.parents[i].grad += getattr(self, backward_op)(alt_parents=(tuple(self.parents[:i]+self.parents[i+1:])), parent=self.parents[i], forward_grad=forward_grad)
                 if self.parents[i].gen_op is not None:
                     self.parents[i]._grad(self.parents[i].grad)
 
     def _zero_grad(self,):
         assert self.requires_grad, "Grad is not enabled for this tensor"
         self.grad = Tensor(value=np.zeros(self.shape))
-
-
-    
-
-
 
 
 
