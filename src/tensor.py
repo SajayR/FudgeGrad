@@ -1,5 +1,9 @@
 import numpy as np
+"""
+TODO: 
+-Broadcast handling
 
+"""
 class Tensor():
     def __init__(self, shape: tuple=None, dtype=float, value: np.ndarray=None, requires_grad: bool=False, parents: tuple=None, gen_op: str=None) -> None:
         assert shape is not None or value is not None, "Either shape or data has to be passed for tensor creation"
@@ -19,7 +23,6 @@ class Tensor():
         if self.requires_grad:
             self.grad = Tensor(value=np.zeros(self.shape))
         else: self.grad = None
-
     def __repr__(self) -> str: return(f"{self.data}")
 
     """Operations"""
@@ -30,26 +33,38 @@ class Tensor():
         else:
             parents=(self,)
             return Tensor(value=np.add(self.data, additive), parents=parents, gen_op="add", requires_grad=self.requires_grad)
-        
     def __mul__(self, multiplicand: "Tensor | float"): #doing elementwise here, not cross fuck cross
         if isinstance(multiplicand, Tensor):
             parents=(self, multiplicand)
             return Tensor(value=self.data*multiplicand.data, parents=parents, gen_op="mul", requires_grad=(self.requires_grad or multiplicand.requires_grad))
         else:
             parents=(self, multiplicand)
-            return Tensor(value=self.data*multiplicand, parents=parents, gen_op="scaler_mul", requires_grad=self.requires_grad)
+            return Tensor(value=self.data*multiplicand, parents=parents, gen_op="mul", requires_grad=self.requires_grad)
+    def __pow__(self, power):
+        parents=(self, power)
+        return(Tensor(value=self.data.__pow__(power), parents=parents, gen_op="pow", requires_grad=self.requires_grad))
+        
+    def _matmul_(self, multiplicand: "Tensor"):
+        assert self.shape[1]==multiplicand.shape[0], f"My guy take some linear alg classes (axb)X(bxc). Inner dimensions of both dimensions dont match {self.shape}, {multiplicand.shape}"
+        parents=(self, multiplicand)
+        return Tensor(value=self.data@multiplicand.data, parents=parents, gen_op="matmul", requires_grad=(self.requires_grad or multiplicand.requires_grad))
         
     """Grad Operations"""
     def _add_backward(self, alt_parents: tuple, parent: "Tensor", forward_grad: "Tensor"):
         return forward_grad
-    
     def _mul_backward(self, alt_parents: tuple, parent: "Tensor", forward_grad: "Tensor"):
-        assert isinstance(alt_parents[0], Tensor)
-        return alt_parents[0] * forward_grad
+        if isinstance(alt_parents[0], Tensor): return alt_parents[0] * forward_grad
+        else: return forward_grad*float(alt_parents[0])
 
-    def _scaler_mul_backward(self, alt_parents: tuple, parent: "Tensor", forward_grad: "Tensor"):
-        scaler=float(alt_parents[0])
-        return forward_grad*scaler
+    def _matmul_backward(self, alt_parents: tuple, parent: "Tensor", forward_grad: "Tensor"):
+        pass
+
+    def _pow_backward(self, alt_parents: tuple, parent: "Tensor", forward_grad: "Tensor"):
+        power=float(alt_parents[0])
+        return Tensor(value=power*(parent.data**(power-1)*forward_grad.data))
+
+
+
         
     def _grad(self, forward_grad: "Tensor"=None): 
         assert self.requires_grad, 'Grad is not enabled for this tensor'
@@ -69,9 +84,6 @@ class Tensor():
         assert self.requires_grad, "Grad is not enabled for this tensor"
         self.grad = Tensor(value=np.zeros(self.shape))
 
-
-
-
 if __name__ == "__main__":
     # Create tensors
     a = Tensor(value=np.array([2.0]), requires_grad=True)
@@ -90,5 +102,31 @@ if __name__ == "__main__":
     print(b.grad)
     #print(L._grad())    # this should populate gradients
 
+    a = Tensor(value=np.array([2.0]), requires_grad=True)
+    b = a ** 2    # b = 4
+    c = b * 3     # c = 12
+
+    print(c)
+    c._grad()
+    print(c.grad, b.grad, a.grad)
+
+    # Let's minimize (x^2 + 2)^2 or something
+    x = Tensor(value=np.array([5.0]), requires_grad=True)  # start at x=5
+    learning_rate = 0.1
+
+    for step in range(100):
+        # Forward pass
+        y = (x + 2) ** 2
+        
+        # Backward pass
+          # Important! Clear old grads
+        x._zero_grad()
+        y._grad()
+        
+        # Gradient descent step
+        x.data = x.data - learning_rate * x.grad.data
+        
+        if step % 10 == 0:
+            print(f"Step {step}, x = {x}, loss = {y}")
 
     # Print gradients - let's see if they match what we calculated by hand!
