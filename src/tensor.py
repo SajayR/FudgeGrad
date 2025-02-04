@@ -1,5 +1,5 @@
 import numpy as np
-from grad_ops import grad_operations
+
 class Tensor():
     def __init__(self, shape: tuple=None, dtype=float, value: np.ndarray=None, requires_grad: bool=False, parents: tuple=None, gen_op: str=None) -> None:
         assert shape is not None or value is not None, "Either shape or data has to be passed for tensor creation"
@@ -12,6 +12,8 @@ class Tensor():
         self.shape = self.data.shape
         self.size = self.data.size
         self.requires_grad = requires_grad
+        self.gen_op=None
+        self.parents=None
         if parents is not None: self.parents = parents
         if gen_op is not None: self.gen_op = gen_op
         if self.requires_grad:
@@ -19,6 +21,8 @@ class Tensor():
         else: self.grad = None
 
     def __repr__(self) -> str: return(f"{self.data}")
+
+    """Operations"""
     def __add__(self, additive: "Tensor | float"): #float carries no grad
         if isinstance(additive, Tensor):
             parents=(self, additive)
@@ -27,34 +31,35 @@ class Tensor():
             parents=(self,)
             return Tensor(value=np.add(self.data, additive), parents=parents, gen_op="add", requires_grad=self.requires_grad)
         
-    def __mul__(self, multiplicand: "Tensor | float"): #doing dot product here, not cross
+    def __mul__(self, multiplicand: "Tensor | float"): #doing elementwise here, not cross fuck cross
         if isinstance(multiplicand, Tensor):
             parents=(self, multiplicand)
             return Tensor(value=self.data*multiplicand.data, parents=parents, gen_op="mul", requires_grad=(self.requires_grad or multiplicand.requires_grad))
         else:
-            parents=(self,)
+            parents=(self, multiplicand)
             return Tensor(value=self.data*multiplicand, parents=parents, gen_op="mul", requires_grad=self.requires_grad)
         
-    def _grad(self, forward_grad: Tensor=None): 
+    """Grad Operations"""
+    def _add_backward(self, alt_parents: tuple, parent: "Tensor", forward_grad: "Tensor"):
+        return forward_grad
+    
+    def _mul_backward(self, alt_parents: tuple, parent: "Tensor", forward_grad: "Tensor"):
+        return alt_parents[0] * forward_grad
+        
+    def _grad(self, forward_grad: "Tensor"=None): 
         assert self.requires_grad, 'Grad is not enabled for this tensor'
-        self.local_grad_op = grad_operations[self.gen_op] #what operation generated this shit's gradient formula 
-        #local_grad_op is a func that returns the gradient vector
-        #local_grad_op takes in the rest of the parents, and the forward_grad
+        backward_op = f"_{self.gen_op.lower()}_backward"
+        print(f"Backward op {backward_op}")
         if forward_grad is None:
             for i, parent in enumerate(self.parents):   
-                self.parents[i].grad += self.local_grad_op((self.parents[:i]+self.parents[i+1:]), forward_grad=Tensor(value=np.ones(self.shape)))
+                self.parents[i].grad += getattr(self, backward_op)(alt_parents=(self.parents[:i]+self.parents[i+1:]), parent=self.parents[i], forward_grad=Tensor(value=np.ones(self.shape)))
+                if self.parents[i].gen_op is not None:
+                    self.parents[i]._grad(self.parents[i].grad)
         else:
             for i, parent in enumerate(self.parents):   
-                self.parents[i].grad += self.local_grad_op((self.parents[:i]+self.parents[i+1:]), forward_grad=forward_grad)
-
-                
-    
-
-
-
-
-
-
+                self.parents[i].grad += getattr(self, backward_op)(alt_parents=(self.parents[:i]+self.parents[i+1:]), parent=self.parents[i], forward_grad=forward_grad)
+                if self.parents[i].gen_op is not None:
+                    self.parents[i]._grad(self.parents[i].grad)
 
     def _zero_grad(self,):
         assert self.requires_grad, "Grad is not enabled for this tensor"
@@ -68,11 +73,23 @@ class Tensor():
 
 
 
-if __name__=="__main__":
-    array = np.ones((2,3))
-    a = Tensor(shape=(2,3))
-    b = Tensor(value=array)
-    print(a)
-    print(a+b)
+if __name__ == "__main__":
+    # Create tensors
+    a = Tensor(value=np.array([2.0]), requires_grad=True)
+    b = Tensor(value=np.array([3.0]), requires_grad=True)
+    
+    c = a * b    # c = 6
+    d = c + 1    # d = 7
+    e = d * 2    # e = 14   # should be 6
+    
 
-        
+    # Now backprop and check gradients
+    print(e)
+    e._grad()
+    print(c.grad)
+    print(a.grad)
+    print(b.grad)
+    #print(L._grad())    # this should populate gradients
+
+
+    # Print gradients - let's see if they match what we calculated by hand!
