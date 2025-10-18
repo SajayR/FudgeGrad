@@ -1,132 +1,805 @@
+from typing import Iterable, Optional, Sequence
+
 import numpy as np
-"""
-TODO: 
--Broadcast handling
 
-"""
-class Tensor():
-    def __init__(self, shape: tuple=None, dtype=float, value: np.ndarray=None, requires_grad: bool=False, parents: tuple=None, gen_op: str=None) -> None:
-        assert shape is not None or value is not None, "Either shape or data has to be passed for tensor creation"
-        assert ((shape is not None) and (value is None)) or ((shape is None) and (value is not None)), "Only one of value or shape can be defined. If a numpy array is provided as the value, the shape will be replicated."
-        if value is not None:
-            assert isinstance(value, np.ndarray)
-            self.data = value.copy()
-        else: self.data = np.empty(shape=shape, dtype=dtype)      
-        self.dtype = self.data.dtype
-        self.shape = self.data.shape
-        self.size = self.data.size
-        self.requires_grad = requires_grad
-        self.gen_op=None
-        self.parents=None
-        if parents is not None: self.parents = parents
-        if gen_op is not None: self.gen_op = gen_op
+
+def _to_array(data, dtype=None) -> np.ndarray:
+    return np.asarray(data, dtype=dtype)
+
+
+def _sum_to_shape(grad: np.ndarray, shape: Sequence[int]) -> np.ndarray:
+    grad = np.asarray(grad)
+    shape = tuple(shape)
+    if grad.shape == shape:
+        return grad
+    if shape == ():
+        return np.array(grad).sum()
+    pad = grad.ndim - len(shape)
+    if pad < 0:
+        raise ValueError(f"Cannot reduce gradient from {grad.shape} to {shape}")
+    expand_shape = (1,) * pad + shape
+    for axis, (g_dim, s_dim) in enumerate(zip(grad.shape, expand_shape)):
+        if s_dim == 1 and g_dim != 1:
+            grad = grad.sum(axis=axis, keepdims=True)
+    return grad.reshape(shape)
+
+
+def _canonicalize_axes(axis, ndim):
+    if axis is None:
+        return None
+    if isinstance(axis, int):
+        axis = (axis,)
+    return tuple(sorted(a if a >= 0 else ndim + a for a in axis))
+
+
+class Tensor:
+    __slots__ = ("data", "requires_grad", "grad", "_backward", "_prev", "_op")
+    __array_priority__ = 100
+
+    def __init__(self, data, *, dtype=None, requires_grad: bool = False, _children: Iterable["Tensor"] = (), _op: str = ""):
+        if isinstance(data, Tensor):
+            data = data.data
+        self.data = _to_array(data, dtype=dtype)
+        self.requires_grad = bool(requires_grad)
+        self.grad = np.zeros_like(self.data, dtype=self.data.dtype) if self.requires_grad else None
+        self._backward = lambda: None
+        self._prev = tuple(_children)
+        self._op = _op
+
+    def __repr__(self) -> str:
+        return f"Tensor({self.data!r}, requires_grad={self.requires_grad})"
+
+    @property
+    def shape(self):  # type: ignore[override]
+        return self.data.shape
+
+    @property
+    def ndim(self):
+        return self.data.ndim
+
+    @property
+    def size(self):
+        return self.data.size
+
+    def __len__(self):
+        return len(self.data)
+
+    def numpy(self) -> np.ndarray:
+        return np.asarray(self.data)
+
+    def item(self):
+        return self.data.item()
+
+    def detach(self) -> "Tensor":
+        return Tensor(self.data.copy(), requires_grad=False)
+
+    def clone(self, *, requires_grad: Optional[bool] = None) -> "Tensor":
+        req = self.requires_grad if requires_grad is None else requires_grad
+        return Tensor(self.data.copy(), requires_grad=req)
+
+    def requires_grad_(self, flag: bool = True) -> "Tensor":
+        self.requires_grad = bool(flag)
+        self.grad = np.zeros_like(self.data, dtype=self.data.dtype) if self.requires_grad else None
+        return self
+
+    def zero_grad(self) -> None:
+        if self.requires_grad and self.grad is not None:
+            self.grad.fill(0)
+
+    def backward(self, grad=None) -> None:
+        if grad is None:
+            if self.data.size != 1:
+                raise RuntimeError("grad must be specified for non-scalar outputs")
+            grad = np.ones_like(self.data, dtype=self.data.dtype)
+        else:
+            grad = _to_array(grad, dtype=self.data.dtype)
+        topo, visited = [], set()
+
+        def build(v: "Tensor"):
+            if id(v) not in visited:
+                visited.add(id(v))
+                for child in v._prev:
+                    build(child)
+                topo.append(v)
+
+        build(self)
         if self.requires_grad:
-            self.grad = Tensor(value=np.zeros(self.shape))
-        else: self.grad = None
-    def __repr__(self) -> str: return(f"{self.data}")
+            self.grad = self.grad if self.grad is not None else np.zeros_like(self.data, dtype=self.data.dtype)
+            self.grad += grad
+        for node in reversed(topo):
+            if node.requires_grad and node.grad is None:
+                node.grad = np.zeros_like(node.data, dtype=node.data.dtype)
+            node._backward()
 
-    """Operations"""
-    def __add__(self, additive: "Tensor | float"): #float carries no grad
-        if isinstance(additive, Tensor):
-            parents=(self, additive)
-            return Tensor(value=np.add(self.data, additive.data), parents=parents, gen_op="add", requires_grad=(self.requires_grad or additive.requires_grad))
-        else:
-            parents=(self,)
-            return Tensor(value=np.add(self.data, additive), parents=parents, gen_op="add", requires_grad=self.requires_grad)
-    def __mul__(self, multiplicand: "Tensor | float"): #doing elementwise here, not cross fuck cross
-        if isinstance(multiplicand, Tensor):
-            parents=(self, multiplicand)
-            return Tensor(value=self.data*multiplicand.data, parents=parents, gen_op="mul", requires_grad=(self.requires_grad or multiplicand.requires_grad))
-        else:
-            parents=(self, multiplicand)
-            return Tensor(value=self.data*multiplicand, parents=parents, gen_op="mul", requires_grad=self.requires_grad)
+    def _binary_op(self, other, op, grad_self, grad_other, name):
+        other_tensor = other if isinstance(other, Tensor) else None
+        other_data = other_tensor.data if other_tensor is not None else other
+        data = op(self.data, other_data)
+        requires_grad = self.requires_grad or (other_tensor is not None and other_tensor.requires_grad)
+        parents = tuple(p for p in (self, other_tensor) if isinstance(p, Tensor))
+        out = Tensor(data, requires_grad=requires_grad, _children=parents, _op=name)
+
+        def _backward():
+            if out.grad is None:
+                return
+            if self.requires_grad:
+                self.grad += _sum_to_shape(grad_self(out.grad, self.data, other_data), self.shape)
+            if other_tensor is not None and other_tensor.requires_grad:
+                other_tensor.grad += _sum_to_shape(grad_other(out.grad, self.data, other_tensor.data), other_tensor.shape)
+
+        out._backward = _backward
+        return out
+
+    def __abs__(self):
+        return self.abs()
+
+    def __add__(self, other):
+        return self._binary_op(other, np.add, lambda g, *_: g, lambda g, *_: g, "add")
+
+    def __radd__(self, other):
+        return self + other
+
+    def __sub__(self, other):
+        return self._binary_op(other, np.subtract, lambda g, *_: g, lambda g, *_: -g, "sub")
+
+    def __rsub__(self, other):
+        return (other if isinstance(other, Tensor) else Tensor(other)) - self
+
+    def __mul__(self, other):
+        return self._binary_op(other, np.multiply, lambda g, self_data, other_data: g * other_data, lambda g, self_data, other_data: g * self_data, "mul")
+
+    def __rmul__(self, other):
+        return self * other
+
+    def __truediv__(self, other):
+        return self._binary_op(
+            other,
+            np.divide,
+            lambda g, self_data, other_data: g / other_data,
+            lambda g, self_data, other_data: -g * self_data / (other_data ** 2),
+            "div",
+        )
+
+    def __rtruediv__(self, other):
+        return (other if isinstance(other, Tensor) else Tensor(other)) / self
+
     def __pow__(self, power):
-        parents=(self, power)
-        return(Tensor(value=self.data.__pow__(power), parents=parents, gen_op="pow", requires_grad=self.requires_grad))
-        
-    def _matmul_(self, multiplicand: "Tensor"):
-        assert self.shape[1]==multiplicand.shape[0], f"My guy take some linear alg classes (axb)X(bxc). Inner dimensions of both dimensions dont match {self.shape}, {multiplicand.shape}"
-        parents=(self, multiplicand)
-        return Tensor(value=self.data@multiplicand.data, parents=parents, gen_op="matmul", requires_grad=(self.requires_grad or multiplicand.requires_grad))
-        
-    """Grad Operations"""
-    def _add_backward(self, alt_parents: tuple, parent: "Tensor", forward_grad: "Tensor"):
-        return forward_grad
-    def _mul_backward(self, alt_parents: tuple, parent: "Tensor", forward_grad: "Tensor"):
-        if isinstance(alt_parents[0], Tensor): return alt_parents[0] * forward_grad
-        else: return forward_grad*float(alt_parents[0])
+        power_tensor = power if isinstance(power, Tensor) else None
+        power_data = power_tensor.data if power_tensor is not None else power
+        data = np.power(self.data, power_data)
+        requires_grad = self.requires_grad or (power_tensor is not None and power_tensor.requires_grad)
+        parents = (self,) + ((power_tensor,) if power_tensor is not None else ())
+        out = Tensor(data, requires_grad=requires_grad, _children=parents, _op="pow")
 
-    def _matmul_backward(self, alt_parents: tuple, parent: "Tensor", forward_grad: "Tensor"):
-        pass
+        def _backward():
+            if out.grad is None:
+                return
+            if self.requires_grad:
+                base_grad = out.grad * power_data * np.power(self.data, power_data - 1)
+                self.grad += _sum_to_shape(base_grad, self.shape)
+            if power_tensor is not None and power_tensor.requires_grad:
+                safe = np.where(self.data > 0, self.data, 1)
+                exp_grad = out.grad * data * np.log(safe)
+                power_tensor.grad += _sum_to_shape(exp_grad, power_tensor.shape)
 
-    def _pow_backward(self, alt_parents: tuple, parent: "Tensor", forward_grad: "Tensor"):
-        power=float(alt_parents[0])
-        return Tensor(value=power*(parent.data**(power-1)*forward_grad.data))
+        out._backward = _backward
+        return out
 
+    def __neg__(self):
+        out = Tensor(-self.data, requires_grad=self.requires_grad, _children=(self,), _op="neg")
 
+        def _backward():
+            if out.grad is not None and self.requires_grad:
+                self.grad -= _sum_to_shape(out.grad, self.shape)
 
-        
-    def _grad(self, forward_grad: "Tensor"=None): 
-        assert self.requires_grad, 'Grad is not enabled for this tensor'
-        backward_op = f"_{self.gen_op.lower()}_backward"
-        if forward_grad is None:
-            for i, parent in enumerate([p for p in self.parents if isinstance(p, Tensor)]) :   
-                self.parents[i].grad += getattr(self, backward_op)(alt_parents=(tuple(self.parents[:i]+self.parents[i+1:])), parent=self.parents[i], forward_grad=Tensor(value=np.ones(self.shape)))
-                if self.parents[i].gen_op is not None:
-                    self.parents[i]._grad(self.parents[i].grad)
+        out._backward = _backward
+        return out
+
+    def __matmul__(self, other):
+        other_tensor = other if isinstance(other, Tensor) else Tensor(other)
+        data = self.data @ other_tensor.data
+        requires_grad = self.requires_grad or other_tensor.requires_grad
+        out = Tensor(data, requires_grad=requires_grad, _children=(self, other_tensor), _op="matmul")
+
+        def _backward():
+            if out.grad is None:
+                return
+            if self.requires_grad:
+                self.grad += out.grad @ other_tensor.data.swapaxes(-1, -2)
+            if other_tensor.requires_grad:
+                other_tensor.grad += self.data.swapaxes(-1, -2) @ out.grad
+
+        out._backward = _backward
+        return out
+
+    @property
+    def T(self):
+        return self.transpose()
+
+    def transpose(self, *axes):
+        data = self.data.transpose(*axes) if axes else self.data.T
+        out = Tensor(data, requires_grad=self.requires_grad, _children=(self,), _op="transpose")
+        axes = tuple(range(self.ndim - 1, -1, -1)) if not axes else axes
+
+        def _backward():
+            if out.grad is not None and self.requires_grad:
+                inv = np.argsort(axes)
+                self.grad += out.grad.transpose(inv)
+
+        out._backward = _backward
+        return out
+
+    def reshape(self, *shape):
+        if len(shape) == 1 and isinstance(shape[0], (tuple, list)):
+            shape = tuple(shape[0])
+        out = Tensor(self.data.reshape(*shape), requires_grad=self.requires_grad, _children=(self,), _op="reshape")
+
+        def _backward():
+            if out.grad is not None and self.requires_grad:
+                self.grad += out.grad.reshape(self.shape)
+
+        out._backward = _backward
+        return out
+
+    def squeeze(self, axis=None):
+        data = np.squeeze(self.data, axis=axis)
+        removed = ()
+        if axis is None:
+            removed = tuple(i for i, dim in enumerate(self.shape) if dim == 1)
         else:
-            for i, parent in enumerate([p for p in self.parents if isinstance(p, Tensor)]):   
-                self.parents[i].grad += getattr(self, backward_op)(alt_parents=(tuple(self.parents[:i]+self.parents[i+1:])), parent=self.parents[i], forward_grad=forward_grad)
-                if self.parents[i].gen_op is not None:
-                    self.parents[i]._grad(self.parents[i].grad)
+            axes = axis if isinstance(axis, tuple) else (axis,)
+            removed = tuple((a if a >= 0 else self.ndim + a) for a in axes)
+        out = Tensor(data, requires_grad=self.requires_grad, _children=(self,), _op="squeeze")
 
-    def _zero_grad(self,):
-        assert self.requires_grad, "Grad is not enabled for this tensor"
-        self.grad = Tensor(value=np.zeros(self.shape))
+        def _backward():
+            if out.grad is None or not self.requires_grad:
+                return
+            grad = out.grad
+            for ax in sorted(removed):
+                grad = np.expand_dims(grad, axis=ax)
+            self.grad += grad
+
+        out._backward = _backward
+        return out
+
+    def unsqueeze(self, axis):
+        data = np.expand_dims(self.data, axis=axis)
+        out = Tensor(data, requires_grad=self.requires_grad, _children=(self,), _op="unsqueeze")
+        axis_norm = axis if axis >= 0 else axis + out.ndim
+
+        def _backward():
+            if out.grad is not None and self.requires_grad:
+                self.grad += np.squeeze(out.grad, axis=axis_norm)
+
+        out._backward = _backward
+        return out
+
+    def flatten(self, start_dim=0, end_dim=-1):
+        ndim = self.ndim
+        start = start_dim if start_dim >= 0 else ndim + start_dim
+        end = end_dim if end_dim >= 0 else ndim + end_dim
+        if start < 0 or end >= ndim or start > end:
+            raise ValueError("Invalid flatten dimensions")
+        prefix = self.shape[:start]
+        middle = int(np.prod(self.shape[start : end + 1]))
+        suffix = self.shape[end + 1 :]
+        return self.reshape(*(prefix + (middle,) + suffix))
+
+    def permute(self, *axes):
+        if len(axes) == 1 and isinstance(axes[0], (tuple, list)):
+            axes = tuple(axes[0])
+        if len(axes) != self.ndim:
+            raise ValueError("permute expects as many axes as tensor dimensions")
+        return self.transpose(*axes)
+
+    def broadcast_to(self, *shape):
+        if len(shape) == 1 and isinstance(shape[0], (tuple, list)):
+            shape = tuple(shape[0])
+        data = np.broadcast_to(self.data, shape)
+        out = Tensor(data, requires_grad=self.requires_grad, _children=(self,), _op="broadcast_to")
+
+        def _backward():
+            if out.grad is not None and self.requires_grad:
+                self.grad += _sum_to_shape(out.grad, self.shape)
+
+        out._backward = _backward
+        return out
+
+    expand = broadcast_to
+
+    def sum(self, axis=None, keepdims=False):
+        data = self.data.sum(axis=axis, keepdims=keepdims)
+        out = Tensor(data, requires_grad=self.requires_grad, _children=(self,), _op="sum")
+        axes = _canonicalize_axes(axis, self.ndim)
+
+        def _backward():
+            if out.grad is None or not self.requires_grad:
+                return
+            grad = out.grad
+            if axes is None:
+                grad = np.broadcast_to(np.array(grad, dtype=self.data.dtype), self.shape)
+            else:
+                if not keepdims:
+                    for ax in axes:
+                        grad = np.expand_dims(grad, axis=ax)
+                grad = np.broadcast_to(grad, self.shape)
+            self.grad += grad
+
+        out._backward = _backward
+        return out
+
+    def mean(self, axis=None, keepdims=False):
+        axes = _canonicalize_axes(axis, self.ndim)
+        count = self.data.size if axes is None else np.prod([self.data.shape[a] for a in axes])
+        data = self.data.mean(axis=axis, keepdims=keepdims)
+        out = Tensor(data, requires_grad=self.requires_grad, _children=(self,), _op="mean")
+
+        def _backward():
+            if out.grad is None or not self.requires_grad:
+                return
+            grad = out.grad / count
+            if axes is None:
+                grad = np.broadcast_to(np.array(grad, dtype=self.data.dtype), self.shape)
+            else:
+                if not keepdims:
+                    for ax in axes:
+                        grad = np.expand_dims(grad, axis=ax)
+                grad = np.broadcast_to(grad, self.shape)
+            self.grad += grad
+
+        out._backward = _backward
+        return out
+
+    def var(self, axis=None, keepdims=False, unbiased=False):
+        axes = _canonicalize_axes(axis, self.ndim)
+        count = self.data.size if axes is None else np.prod([self.data.shape[a] for a in axes])
+        denom = count - 1 if (unbiased and count > 1) else count
+        denom = max(denom, 1)
+        mean = self.data.mean(axis=axis, keepdims=True)
+        diff = self.data - mean
+        sum_axes = None if axes is None else axes
+        var_data = (diff ** 2).sum(axis=sum_axes, keepdims=True) / denom
+        if not keepdims:
+            if axes is None:
+                var_data = np.array(var_data, dtype=self.data.dtype).reshape(())
+            else:
+                var_data = np.squeeze(var_data, axis=axes)
+        out = Tensor(var_data, requires_grad=self.requires_grad, _children=(self,), _op="var")
+
+        def _backward():
+            if out.grad is None or not self.requires_grad:
+                return
+            grad = out.grad / denom
+            if axes is None:
+                grad = np.broadcast_to(np.array(grad, dtype=self.data.dtype), self.shape)
+            else:
+                if not keepdims:
+                    for ax in axes:
+                        grad = np.expand_dims(grad, axis=ax)
+                grad = np.broadcast_to(grad, self.shape)
+            centered = self.data - mean
+            self.grad += 2 * centered * grad
+
+        out._backward = _backward
+        return out
+
+    def std(self, axis=None, keepdims=False, unbiased=False):
+        return self.var(axis=axis, keepdims=keepdims, unbiased=unbiased) ** 0.5
+
+    def sqrt(self, eps=0.0):
+        data = np.sqrt(self.data + eps)
+        out = Tensor(data, requires_grad=self.requires_grad, _children=(self,), _op="sqrt")
+
+        def _backward():
+            if out.grad is not None and self.requires_grad:
+                denom = 2 * data
+                self.grad += out.grad / (denom + 1e-12)
+
+        out._backward = _backward
+        return out
+
+    def abs(self):
+        data = np.abs(self.data)
+        out = Tensor(data, requires_grad=self.requires_grad, _children=(self,), _op="abs")
+
+        def _backward():
+            if out.grad is not None and self.requires_grad:
+                grad = np.sign(self.data)
+                grad[self.data == 0] = 0
+                self.grad += out.grad * grad
+
+        out._backward = _backward
+        return out
+
+    def sign(self):
+        data = np.sign(self.data)
+        out = Tensor(data, requires_grad=self.requires_grad, _children=(self,), _op="sign")
+
+        def _backward():
+            return
+
+        out._backward = _backward
+        return out
+
+    def norm(self, axis=None, keepdims=False, eps=1e-12):
+        squared = (self * self).sum(axis=axis, keepdims=keepdims)
+        if eps:
+            squared = squared + eps
+        return squared ** 0.5
+
+    def logsumexp(self, axis=None, keepdims=False):
+        max_keep = self.data.max(axis=axis, keepdims=True)
+        shifted = self.data - max_keep
+        exp_shifted = np.exp(shifted)
+        sum_exp = exp_shifted.sum(axis=axis, keepdims=True)
+        logsum = np.log(sum_exp) + max_keep
+        if not keepdims and axis is not None:
+            axes = _canonicalize_axes(axis, self.ndim)
+            logsum = np.squeeze(logsum, axis=axes)
+        out = Tensor(logsum, requires_grad=self.requires_grad, _children=(self,), _op="logsumexp")
+        axes = _canonicalize_axes(axis, self.ndim)
+
+        def _backward():
+            if out.grad is None or not self.requires_grad:
+                return
+            grad = out.grad
+            if axes is None:
+                grad = np.broadcast_to(np.array(grad, dtype=self.data.dtype), self.shape)
+            else:
+                if not keepdims:
+                    for ax in axes:
+                        grad = np.expand_dims(grad, axis=ax)
+                grad = np.broadcast_to(grad, self.shape)
+            self.grad += grad * (exp_shifted / sum_exp)
+
+        out._backward = _backward
+        return out
+
+    def exp(self):
+        data = np.exp(self.data)
+        out = Tensor(data, requires_grad=self.requires_grad, _children=(self,), _op="exp")
+
+        def _backward():
+            if out.grad is not None and self.requires_grad:
+                self.grad += out.grad * data
+
+        out._backward = _backward
+        return out
+
+    def log(self):
+        data = np.log(self.data)
+        out = Tensor(data, requires_grad=self.requires_grad, _children=(self,), _op="log")
+
+        def _backward():
+            if out.grad is not None and self.requires_grad:
+                self.grad += out.grad / self.data
+
+        out._backward = _backward
+        return out
+
+    def tanh(self):
+        data = np.tanh(self.data)
+        out = Tensor(data, requires_grad=self.requires_grad, _children=(self,), _op="tanh")
+
+        def _backward():
+            if out.grad is not None and self.requires_grad:
+                self.grad += out.grad * (1 - data ** 2)
+
+        out._backward = _backward
+        return out
+
+    def relu(self):
+        data = np.maximum(self.data, 0)
+        out = Tensor(data, requires_grad=self.requires_grad, _children=(self,), _op="relu")
+
+        def _backward():
+            if out.grad is not None and self.requires_grad:
+                self.grad += out.grad * (self.data > 0)
+
+        out._backward = _backward
+        return out
+
+    def sigmoid(self):
+        data = 1 / (1 + np.exp(-self.data))
+        out = Tensor(data, requires_grad=self.requires_grad, _children=(self,), _op="sigmoid")
+
+        def _backward():
+            if out.grad is not None and self.requires_grad:
+                self.grad += out.grad * data * (1 - data)
+
+        out._backward = _backward
+        return out
+
+    def softmax(self, axis=-1):
+        shifted = self.data - self.data.max(axis=axis, keepdims=True)
+        exps = np.exp(shifted)
+        data = exps / exps.sum(axis=axis, keepdims=True)
+        out = Tensor(data, requires_grad=self.requires_grad, _children=(self,), _op="softmax")
+
+        def _backward():
+            if out.grad is None or not self.requires_grad:
+                return
+            grad = out.grad
+            dot = (grad * data).sum(axis=axis, keepdims=True)
+            self.grad += (grad - dot) * data
+
+        out._backward = _backward
+        return out
+
+    def log_softmax(self, axis=-1):
+        shifted = self.data - self.data.max(axis=axis, keepdims=True)
+        logsum = np.log(np.exp(shifted).sum(axis=axis, keepdims=True))
+        data = shifted - logsum
+        out = Tensor(data, requires_grad=self.requires_grad, _children=(self,), _op="log_softmax")
+
+        def _backward():
+            if out.grad is None or not self.requires_grad:
+                return
+            grad = out.grad
+            self.grad += grad - np.exp(data) * grad.sum(axis=axis, keepdims=True)
+
+        out._backward = _backward
+        return out
+
+    def clip(self, min_value, max_value):
+        data = np.clip(self.data, min_value, max_value)
+        out = Tensor(data, requires_grad=self.requires_grad, _children=(self,), _op="clip")
+
+        def _backward():
+            if out.grad is not None and self.requires_grad:
+                mask = (self.data >= min_value) & (self.data <= max_value)
+                self.grad += out.grad * mask
+
+        out._backward = _backward
+        return out
+
+    def maximum(self, other):
+        other_tensor = other if isinstance(other, Tensor) else None
+        other_data = other_tensor.data if other_tensor is not None else np.asarray(other)
+        data = np.maximum(self.data, other_data)
+        requires_grad = self.requires_grad or (other_tensor is not None and other_tensor.requires_grad)
+        parents = tuple(p for p in (self, other_tensor) if isinstance(p, Tensor))
+        out = Tensor(data, requires_grad=requires_grad, _children=parents, _op="maximum")
+
+        def _backward():
+            if out.grad is None:
+                return
+            other_requires = other_tensor is not None and other_tensor.requires_grad
+            grad_dtype = out.grad.dtype
+            mask_self = (self.data > other_data).astype(grad_dtype, copy=False)
+            mask_other = None
+            if other_requires:
+                mask_other = (self.data < other_tensor.data).astype(grad_dtype, copy=False)
+            equal_mask = (self.data == other_data).astype(grad_dtype, copy=False)
+            if self.requires_grad:
+                coeff = mask_self
+                coeff = coeff + (equal_mask * (0.5 if other_requires else 1.0))
+                self.grad += _sum_to_shape(out.grad * coeff, self.shape)
+            if other_requires:
+                coeff = mask_other
+                coeff = coeff + (equal_mask * (0.5 if self.requires_grad else 1.0))
+                other_tensor.grad += _sum_to_shape(out.grad * coeff, other_tensor.shape)
+
+        out._backward = _backward
+        return out
+
+    def minimum(self, other):
+        other_tensor = other if isinstance(other, Tensor) else None
+        other_data = other_tensor.data if other_tensor is not None else np.asarray(other)
+        data = np.minimum(self.data, other_data)
+        requires_grad = self.requires_grad or (other_tensor is not None and other_tensor.requires_grad)
+        parents = tuple(p for p in (self, other_tensor) if isinstance(p, Tensor))
+        out = Tensor(data, requires_grad=requires_grad, _children=parents, _op="minimum")
+
+        def _backward():
+            if out.grad is None:
+                return
+            other_requires = other_tensor is not None and other_tensor.requires_grad
+            grad_dtype = out.grad.dtype
+            mask_self = (self.data < other_data).astype(grad_dtype, copy=False)
+            mask_other = None
+            if other_requires:
+                mask_other = (self.data > other_tensor.data).astype(grad_dtype, copy=False)
+            equal_mask = (self.data == other_data).astype(grad_dtype, copy=False)
+            if self.requires_grad:
+                coeff = mask_self
+                coeff = coeff + (equal_mask * (0.5 if other_requires else 1.0))
+                self.grad += _sum_to_shape(out.grad * coeff, self.shape)
+            if other_requires:
+                coeff = mask_other
+                coeff = coeff + (equal_mask * (0.5 if self.requires_grad else 1.0))
+                other_tensor.grad += _sum_to_shape(out.grad * coeff, other_tensor.shape)
+
+        out._backward = _backward
+        return out
+
+
+    def __getitem__(self, idx):
+        data = self.data[idx]
+        out = Tensor(data, requires_grad=self.requires_grad, _children=(self,), _op="slice")
+
+        def _backward():
+            if out.grad is None or not self.requires_grad:
+                return
+            grad = np.zeros_like(self.data)
+            grad[idx] = out.grad
+            self.grad += grad
+
+        out._backward = _backward
+        return out
+
+    @staticmethod
+    def zeros(shape, *, dtype=None, requires_grad=False):
+        return Tensor(np.zeros(shape, dtype=dtype), requires_grad=requires_grad)
+
+    @staticmethod
+    def ones(shape, *, dtype=None, requires_grad=False):
+        return Tensor(np.ones(shape, dtype=dtype), requires_grad=requires_grad)
+
+    @staticmethod
+    def randn(shape, *, dtype=None, requires_grad=False, seed=None):
+        rng = np.random.default_rng(seed)
+        return Tensor(rng.standard_normal(shape, dtype=dtype), requires_grad=requires_grad)
+
+    @staticmethod
+    def from_numpy(array: np.ndarray, *, requires_grad=False):
+        return Tensor(np.array(array, copy=True), requires_grad=requires_grad)
+
+
+def where(condition, x, y):
+    cond = np.asarray(condition, dtype=bool)
+    x_t = x if isinstance(x, Tensor) else Tensor(x)
+    y_t = y if isinstance(y, Tensor) else Tensor(y)
+    data = np.where(cond, x_t.data, y_t.data)
+    requires_grad = x_t.requires_grad or y_t.requires_grad
+    parents = tuple(t for t in (x_t, y_t) if isinstance(t, Tensor))
+    out = Tensor(data, requires_grad=requires_grad, _children=parents, _op="where")
+
+    def _backward():
+        if out.grad is None:
+            return
+        mask = np.broadcast_to(cond, out.data.shape)
+        if x_t.requires_grad:
+            x_t.grad += _sum_to_shape(out.grad * mask, x_t.shape)
+        if y_t.requires_grad:
+            y_t.grad += _sum_to_shape(out.grad * (~mask), y_t.shape)
+
+    out._backward = _backward
+    return out
+
+
+def stack(tensors: Sequence[Tensor], axis=0):
+    data = np.stack([t.data for t in tensors], axis=axis)
+    requires_grad = any(t.requires_grad for t in tensors)
+    out = Tensor(data, requires_grad=requires_grad, _children=tuple(tensors), _op="stack")
+
+    def _backward():
+        if out.grad is None:
+            return
+        for i, t in enumerate(tensors):
+            if not t.requires_grad:
+                continue
+            index = [slice(None)] * out.grad.ndim
+            index[axis] = i
+            t.grad += out.grad[tuple(index)]
+
+    out._backward = _backward
+    return out
+
+
+def cat(tensors: Sequence[Tensor], axis=0):
+    data = np.concatenate([t.data for t in tensors], axis=axis)
+    requires_grad = any(t.requires_grad for t in tensors)
+    out = Tensor(data, requires_grad=requires_grad, _children=tuple(tensors), _op="cat")
+    sizes = np.cumsum([t.data.shape[axis] for t in tensors])
+
+    def _backward():
+        if out.grad is None:
+            return
+        start = 0
+        for size, t in zip(sizes, tensors):
+            if not t.requires_grad:
+                continue
+            slc = [slice(None)] * out.grad.ndim
+            slc[axis] = slice(start, size)
+            t.grad += out.grad[tuple(slc)]
+            start = size
+
+    out._backward = _backward
+    return out
+
+
+def mse_loss(pred: Tensor, target: Tensor, reduction: str = "mean") -> Tensor:
+    diff = pred - target
+    loss = diff * diff
+    if reduction == "none":
+        return loss
+    if reduction == "sum":
+        return loss.sum()
+    return loss.mean()
+
+
+def cross_entropy(logits: Tensor, targets, axis=-1):
+    if not isinstance(targets, Tensor):
+        targets = Tensor(np.array(targets), requires_grad=False)
+    log_probs = logits.log_softmax(axis=axis)
+    if targets.data.ndim == log_probs.data.ndim:
+        return (-(targets * log_probs).sum(axis=axis)).mean()
+    if axis not in (-1, log_probs.ndim - 1):
+        raise ValueError("cross_entropy currently expects reduction over the last axis")
+    num_classes = log_probs.data.shape[axis]
+    one_hot = np.eye(num_classes, dtype=log_probs.data.dtype)[targets.data.astype(int)]
+    target_tensor = Tensor(one_hot, requires_grad=False)
+    return (-(target_tensor * log_probs).sum(axis=axis)).mean()
+
+
+def gradcheck(fn, inputs: Sequence[Tensor], eps=1e-4, atol=1e-4, rtol=1e-2):
+    for tensor in inputs:
+        if not tensor.requires_grad:
+            raise ValueError("All inputs to gradcheck must require grad")
+    out = fn(*inputs)
+    if not isinstance(out, Tensor):
+        raise TypeError("Function under test must return a Tensor")
+    if out.data.size != 1:
+        raise ValueError("gradcheck expects scalar output")
+    for tensor in inputs:
+        tensor.zero_grad()
+    out.backward()
+    ok = True
+    for tensor in inputs:
+        analytic = tensor.grad.copy()
+        numeric = np.zeros_like(tensor.data, dtype=tensor.data.dtype)
+        it = np.nditer(tensor.data, flags=["multi_index"], op_flags=["readwrite"])
+        while not it.finished:
+            idx = it.multi_index
+            orig = tensor.data[idx]
+            tensor.data[idx] = orig + eps
+            plus = fn(*inputs).detach().data
+            plus_val = plus.item() if plus.size == 1 else plus.reshape(-1).sum()
+            tensor.data[idx] = orig - eps
+            minus = fn(*inputs).detach().data
+            minus_val = minus.item() if minus.size == 1 else minus.reshape(-1).sum()
+            tensor.data[idx] = orig
+            numeric[idx] = (plus_val - minus_val) / (2 * eps)
+            it.iternext()
+        if not np.allclose(analytic, numeric, atol=atol, rtol=rtol):
+            ok = False
+            break
+    for tensor in inputs:
+        tensor.zero_grad()
+    return ok
+
+
+__all__ = [
+    "Tensor",
+    "where",
+    "stack",
+    "cat",
+    "mse_loss",
+    "cross_entropy",
+    "gradcheck",
+]
+
 
 if __name__ == "__main__":
-    # Create tensors
-    a = Tensor(value=np.array([2.0]), requires_grad=True)
-    b = Tensor(value=np.array([3.0]), requires_grad=True)
-    
-    c = a * b    # c = 6
-    d = c + 1    # d = 7
-    e = d * 2    # e = 14   # should be 6
-    
+    rng = np.random.default_rng(0)
+    features = Tensor(rng.normal(size=(128, 2)))
+    weight = Tensor.randn((2, 1), seed=1, requires_grad=True)
+    bias = Tensor.zeros((1,), requires_grad=True)
+    targets = Tensor(features.data @ np.array([[1.5], [-2.0]]) + 0.3 + rng.normal(scale=0.1, size=(128, 1)))
+    lr = 0.05
+    for step in range(200):
+        preds = features @ weight + bias
+        loss = mse_loss(preds, targets)
+        weight.zero_grad()
+        bias.zero_grad()
+        loss.backward()
+        weight.data -= lr * weight.grad
+        bias.data -= lr * bias.grad
+        if step % 50 == 0:
+            print(f"step {step:03d}  loss={loss.data.item():.6f}")
+    print("fitted weight", weight.data.ravel())
+    print("fitted bias", bias.data)
 
-    # Now backprop and check gradients
-    print(e)
-    e._grad()
-    print(c.grad)
-    print(a.grad)
-    print(b.grad)
-    #print(L._grad())    # this should populate gradients
-
-    a = Tensor(value=np.array([2.0]), requires_grad=True)
-    b = a ** 2    # b = 4
-    c = b * 3     # c = 12
-
-    print(c)
-    c._grad()
-    print(c.grad, b.grad, a.grad)
-
-    # Let's minimize (x^2 + 2)^2 or something
-    x = Tensor(value=np.array([5.0]), requires_grad=True)  # start at x=5
-    learning_rate = 0.1
-
-    for step in range(100):
-        # Forward pass
-        y = (x + 2) ** 2
-        
-        # Backward pass
-          # Important! Clear old grads
-        x._zero_grad()
-        y._grad()
-        
-        # Gradient descent step
-        x.data = x.data - learning_rate * x.grad.data
-        
-        if step % 10 == 0:
-            print(f"Step {step}, x = {x}, loss = {y}")
-
-    # Print gradients - let's see if they match what we calculated by hand!
+    check_tensor = Tensor([1.0, -2.0, 3.0], requires_grad=True)
+    print("gradcheck square:", gradcheck(lambda t: (t * t).sum(), (check_tensor,)))
