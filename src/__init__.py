@@ -8,6 +8,9 @@ from .tensor import (
     cross_entropy,
     gradcheck,
     mse_loss,
+    no_grad,
+    enable_grad,
+    is_grad_enabled,
     stack,
     where,
 )
@@ -30,6 +33,9 @@ from .optim import Adagrad, Adam, AdamW, RMSprop, SGD, clip_grad_norm_
 
 __all__ = [
     "Tensor",
+    "no_grad",
+    "enable_grad",
+    "is_grad_enabled",
     "where",
     "stack",
     "cat",

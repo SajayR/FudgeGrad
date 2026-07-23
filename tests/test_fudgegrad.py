@@ -13,6 +13,7 @@ from src import (
     gradcheck,
     max_pool2d,
     mse_loss,
+    no_grad,
     Linear,
 )
 
@@ -115,6 +116,13 @@ class TestAutograd(unittest.TestCase):
         np.testing.assert_allclose(weight.grad, [1])
         AdamW([weight], lr=0.1, weight_decay=0.1).step()
         self.assertLess(weight.item(), 1)
+
+    def test_no_grad_skips_graph_construction(self):
+        x = Tensor(2.0, requires_grad=True)
+        with no_grad():
+            y = x * x
+        self.assertFalse(y.requires_grad)
+        self.assertEqual(y._prev, ())
 
 
 if __name__ == "__main__":

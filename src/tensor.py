@@ -1,6 +1,37 @@
+from contextlib import contextmanager
 from typing import Iterable, Optional, Sequence
 
 import numpy as np
+
+_grad_enabled = True
+
+
+def is_grad_enabled() -> bool:
+    return _grad_enabled
+
+
+@contextmanager
+def no_grad():
+    """Temporarily stop recording operations in the reverse graph."""
+    global _grad_enabled
+    previous = _grad_enabled
+    _grad_enabled = False
+    try:
+        yield
+    finally:
+        _grad_enabled = previous
+
+
+@contextmanager
+def enable_grad():
+    """Temporarily enable graph recording inside a ``no_grad`` block."""
+    global _grad_enabled
+    previous = _grad_enabled
+    _grad_enabled = True
+    try:
+        yield
+    finally:
+        _grad_enabled = previous
 
 
 def _to_array(data, dtype=None) -> np.ndarray:
@@ -53,6 +84,8 @@ class Tensor:
     ):
         if isinstance(data, Tensor):
             data = data.data
+        if _children and not _grad_enabled:
+            requires_grad, _children = False, ()
         self.data = _to_array(data, dtype=dtype)
         self.requires_grad = bool(requires_grad)
         self.grad = (
@@ -1107,6 +1140,9 @@ def gradcheck(fn, inputs: Sequence[Tensor], eps=1e-4, atol=1e-4, rtol=1e-2):
 
 __all__ = [
     "Tensor",
+    "no_grad",
+    "enable_grad",
+    "is_grad_enabled",
     "where",
     "stack",
     "cat",
