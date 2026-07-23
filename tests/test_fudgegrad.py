@@ -54,5 +54,9 @@ class TestAutograd(unittest.TestCase):
         x = Tensor([-1000., 1000.], requires_grad=True); x.sigmoid().sum().backward()
         np.testing.assert_allclose(x.grad, [0, 0])
 
+    def test_integer_reduction_has_fractional_gradient(self):
+        x = Tensor([1, 2], requires_grad=True); x.mean().backward()
+        np.testing.assert_allclose(x.grad, [.5, .5]); self.assertTrue(gradcheck(lambda a: a.mean(), (x,)))
+
 
 if __name__ == "__main__": unittest.main()

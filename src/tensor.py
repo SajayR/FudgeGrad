@@ -98,7 +98,7 @@ class Tensor:
         if grad is None:
             if self.data.size != 1:
                 raise RuntimeError("grad must be specified for non-scalar outputs")
-            grad = np.ones_like(self.data, dtype=self.data.dtype)
+            grad = np.ones_like(self.data, dtype=_grad_dtype(self.data))
         else:
             grad = _to_array(grad, dtype=_grad_dtype(self.data))
         if grad.shape != self.shape:
@@ -340,7 +340,7 @@ class Tensor:
                 return
             grad = out.grad
             if axes is None:
-                grad = np.broadcast_to(np.array(grad, dtype=self.data.dtype), self.shape)
+                grad = np.broadcast_to(np.array(grad, dtype=_grad_dtype(self.data)), self.shape)
             else:
                 if not keepdims:
                     for ax in axes:
@@ -362,7 +362,7 @@ class Tensor:
                 return
             grad = out.grad / count
             if axes is None:
-                grad = np.broadcast_to(np.array(grad, dtype=self.data.dtype), self.shape)
+                grad = np.broadcast_to(np.array(grad, dtype=_grad_dtype(self.data)), self.shape)
             else:
                 if not keepdims:
                     for ax in axes:
@@ -384,7 +384,7 @@ class Tensor:
         var_data = (diff ** 2).sum(axis=sum_axes, keepdims=True) / denom
         if not keepdims:
             if axes is None:
-                var_data = np.array(var_data, dtype=self.data.dtype).reshape(())
+                var_data = np.asarray(var_data).reshape(())
             else:
                 var_data = np.squeeze(var_data, axis=axes)
         out = Tensor(var_data, requires_grad=self.requires_grad, _children=(self,), _op="var")
@@ -394,7 +394,7 @@ class Tensor:
                 return
             grad = out.grad / denom
             if axes is None:
-                grad = np.broadcast_to(np.array(grad, dtype=self.data.dtype), self.shape)
+                grad = np.broadcast_to(np.array(grad, dtype=_grad_dtype(self.data)), self.shape)
             else:
                 if not keepdims:
                     for ax in axes:
@@ -467,7 +467,7 @@ class Tensor:
                 return
             grad = out.grad
             if axes is None:
-                grad = np.broadcast_to(np.array(grad, dtype=self.data.dtype), self.shape)
+                grad = np.broadcast_to(np.array(grad, dtype=_grad_dtype(self.data)), self.shape)
             else:
                 if not keepdims:
                     for ax in axes:
@@ -846,6 +846,9 @@ def gradcheck(fn, inputs: Sequence[Tensor], eps=1e-4, atol=1e-4, rtol=1e-2):
     for tensor in inputs:
         if not tensor.requires_grad:
             raise ValueError("All inputs to gradcheck must require grad")
+    originals = [tensor.data for tensor in inputs]
+    for tensor in inputs:
+        if tensor.data.dtype.kind not in "fc": tensor.data = tensor.data.astype(float)
     out = fn(*inputs)
     if not isinstance(out, Tensor):
         raise TypeError("Function under test must return a Tensor")
@@ -857,7 +860,7 @@ def gradcheck(fn, inputs: Sequence[Tensor], eps=1e-4, atol=1e-4, rtol=1e-2):
     ok = True
     for tensor in inputs:
         analytic = tensor.grad.copy()
-        numeric = np.zeros_like(tensor.data, dtype=tensor.data.dtype)
+        numeric = np.zeros_like(tensor.data, dtype=_grad_dtype(tensor.data))
         it = np.nditer(tensor.data, flags=["multi_index"], op_flags=["readwrite"])
         while not it.finished:
             idx = it.multi_index
@@ -876,6 +879,7 @@ def gradcheck(fn, inputs: Sequence[Tensor], eps=1e-4, atol=1e-4, rtol=1e-2):
             break
     for tensor in inputs:
         tensor.zero_grad()
+    for tensor, data in zip(inputs, originals): tensor.data = data
     return ok
 
 
