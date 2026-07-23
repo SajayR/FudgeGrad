@@ -1,5 +1,3 @@
-"""In-place NumPy optimizers for FudgeGrad Parameters."""
-
 import numpy as np
 
 
@@ -76,7 +74,6 @@ class Adam(Optimizer):
 
 
 class AdamW(Adam):
-    """Adam with decoupled weight decay."""
 
     def step(self):
         self.t += 1
@@ -155,8 +152,6 @@ class Adagrad(Optimizer):
 
 
 def clip_grad_norm_(parameters, max_norm, norm_type=2.0):
-    """Clip gradients in-place and return their pre-clipping norm."""
-
     grads = [p.grad for p in parameters if p.grad is not None]
     if not grads:
         return 0.0

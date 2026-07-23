@@ -1,5 +1,3 @@
-"""Spatial NumPy kernels kept deliberately small and explicit."""
-
 import numpy as np
 from .tensor import Tensor, _grad_dtype, _sum_to_shape
 

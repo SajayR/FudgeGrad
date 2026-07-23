@@ -4,6 +4,7 @@ from src import (
     Adam,
     AdamW,
     BatchNorm,
+    CrossEntropyLoss,
     Embedding,
     Tensor,
     binary_cross_entropy_with_logits,
@@ -15,6 +16,8 @@ from src import (
     mse_loss,
     no_grad,
     Linear,
+    ReLU,
+    Sequential,
 )
 
 
@@ -123,6 +126,12 @@ class TestAutograd(unittest.TestCase):
             y = x * x
         self.assertFalse(y.requires_grad)
         self.assertEqual(y._prev, ())
+
+    def test_activation_and_loss_modules(self):
+        model = Sequential(Linear(2, 3, seed=0), ReLU(), Linear(3, 2, seed=1))
+        loss = CrossEntropyLoss()(model(Tensor([[1.0, -1.0]])), [1])
+        loss.backward()
+        self.assertTrue(all(p.grad is not None for p in model.parameters()))
 
 
 if __name__ == "__main__":

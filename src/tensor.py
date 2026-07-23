@@ -12,7 +12,6 @@ def is_grad_enabled() -> bool:
 
 @contextmanager
 def no_grad():
-    """Temporarily stop recording operations in the reverse graph."""
     global _grad_enabled
     previous = _grad_enabled
     _grad_enabled = False
@@ -24,7 +23,6 @@ def no_grad():
 
 @contextmanager
 def enable_grad():
-    """Temporarily enable graph recording inside a ``no_grad`` block."""
     global _grad_enabled
     previous = _grad_enabled
     _grad_enabled = True
@@ -39,7 +37,6 @@ def _to_array(data, dtype=None) -> np.ndarray:
 
 
 def _grad_dtype(data) -> np.dtype:
-    """A differentiable integer tensor still needs floating-point cotangents."""
     dtype = np.asarray(data).dtype
     return dtype if dtype.kind in "fc" else np.dtype(float)
 
@@ -101,7 +98,7 @@ class Tensor:
         return f"Tensor({self.data!r}, requires_grad={self.requires_grad})"
 
     @property
-    def shape(self):  # type: ignore[override]
+    def shape(self):
         return self.data.shape
 
     @property
@@ -166,7 +163,6 @@ class Tensor:
                 topo.append(v)
 
         build(self)
-        # Intermediate cotangents belong to one reverse sweep; leaf gradients accumulate.
         for node in topo:
             if node._prev and node.requires_grad:
                 node.grad = np.zeros_like(node.data, dtype=_grad_dtype(node.data))

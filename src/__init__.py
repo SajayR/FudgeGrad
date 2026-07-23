@@ -1,5 +1,3 @@
-"""FudgeGrad: a small CPU-only reverse-mode autodiff library built on NumPy."""
-
 from .tensor import (
     Tensor,
     binary_cross_entropy,
@@ -17,16 +15,27 @@ from .tensor import (
 from .nn import (
     AvgPool2d,
     BatchNorm,
+    BCELoss,
+    BCEWithLogitsLoss,
     Conv2d,
+    CrossEntropyLoss,
     Dropout,
     Embedding,
     Flatten,
     LayerNorm,
+    LeakyReLU,
     Linear,
     MaxPool2d,
     Module,
+    MSELoss,
     Parameter,
+    ReLU,
     Sequential,
+    Sigmoid,
+    Softmax,
+    Tanh,
+    GELU,
+    Identity,
 )
 from .functional import avg_pool2d, conv2d, max_pool2d
 from .optim import Adagrad, Adam, AdamW, RMSprop, SGD, clip_grad_norm_
@@ -50,6 +59,13 @@ __all__ = [
     "Module",
     "Parameter",
     "Linear",
+    "Identity",
+    "ReLU",
+    "LeakyReLU",
+    "GELU",
+    "Sigmoid",
+    "Tanh",
+    "Softmax",
     "Conv2d",
     "MaxPool2d",
     "AvgPool2d",
@@ -59,6 +75,10 @@ __all__ = [
     "Dropout",
     "LayerNorm",
     "BatchNorm",
+    "MSELoss",
+    "BCELoss",
+    "BCEWithLogitsLoss",
+    "CrossEntropyLoss",
     "SGD",
     "Adam",
     "AdamW",

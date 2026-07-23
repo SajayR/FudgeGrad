@@ -1,8 +1,12 @@
-"""Small neural-network building blocks; parameters are ordinary Tensors."""
-
 from collections import OrderedDict
 import numpy as np
-from .tensor import Tensor
+from .tensor import (
+    Tensor,
+    binary_cross_entropy,
+    binary_cross_entropy_with_logits,
+    cross_entropy,
+    mse_loss,
+)
 from .functional import avg_pool2d, conv2d, max_pool2d
 
 
@@ -143,6 +147,49 @@ class Flatten(Module):
         return x.flatten(self.start_dim, self.end_dim)
 
 
+class Identity(Module):
+    def forward(self, x):
+        return x
+
+
+class ReLU(Module):
+    def forward(self, x):
+        return x.relu()
+
+
+class LeakyReLU(Module):
+    def __init__(self, negative_slope=0.01):
+        super().__init__()
+        self.negative_slope = negative_slope
+
+    def forward(self, x):
+        return x.leaky_relu(self.negative_slope)
+
+
+class GELU(Module):
+    def forward(self, x):
+        return x.gelu()
+
+
+class Sigmoid(Module):
+    def forward(self, x):
+        return x.sigmoid()
+
+
+class Tanh(Module):
+    def forward(self, x):
+        return x.tanh()
+
+
+class Softmax(Module):
+    def __init__(self, axis=-1):
+        super().__init__()
+        self.axis = axis
+
+    def forward(self, x):
+        return x.softmax(self.axis)
+
+
 class Embedding(Module):
     def __init__(self, num_embeddings, embedding_dim, seed=None):
         super().__init__()
@@ -264,3 +311,35 @@ class MaxPool2d(Module):
 class AvgPool2d(MaxPool2d):
     def forward(self, x):
         return avg_pool2d(x, self.kernel_size, self.stride)
+
+
+class MSELoss(Module):
+    def __init__(self, reduction="mean"):
+        super().__init__()
+        self.reduction = reduction
+
+    def forward(self, input, target):
+        return mse_loss(input, target, self.reduction)
+
+
+class BCELoss(Module):
+    def __init__(self, reduction="mean"):
+        super().__init__()
+        self.reduction = reduction
+
+    def forward(self, input, target):
+        return binary_cross_entropy(input, target, self.reduction)
+
+
+class BCEWithLogitsLoss(BCELoss):
+    def forward(self, input, target):
+        return binary_cross_entropy_with_logits(input, target, self.reduction)
+
+
+class CrossEntropyLoss(Module):
+    def __init__(self, axis=-1, reduction="mean"):
+        super().__init__()
+        self.axis, self.reduction = axis, reduction
+
+    def forward(self, input, target):
+        return cross_entropy(input, target, self.axis, self.reduction)
