@@ -111,6 +111,10 @@ class Tensor:
                 topo.append(v)
 
         build(self)
+        # Intermediate cotangents belong to one reverse sweep; leaf gradients accumulate.
+        for node in topo:
+            if node._prev and node.requires_grad:
+                node.grad = np.zeros_like(node.data, dtype=_grad_dtype(node.data))
         if self.requires_grad:
             self.grad = self.grad if self.grad is not None else np.zeros_like(self.data, dtype=_grad_dtype(self.data))
             self.grad += grad

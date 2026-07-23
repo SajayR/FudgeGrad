@@ -8,6 +8,10 @@ class TestAutograd(unittest.TestCase):
         x = Tensor([[1., 2.]], requires_grad=True); ((x * x + x).sum()).backward()
         np.testing.assert_allclose(x.grad, [[3, 5]])
 
+    def test_repeated_backward_accumulates_only_leaves(self):
+        x = Tensor(3., requires_grad=True); loss = (x * x).sum(); loss.backward(); loss.backward()
+        self.assertEqual(x.grad.item(), 12.)
+
     def test_batched_matmul_gradcheck(self):
         a, b = Tensor(np.random.randn(2, 3, 4), requires_grad=True), Tensor(np.random.randn(4, 5), requires_grad=True)
         self.assertTrue(gradcheck(lambda x, y: (x @ y).sum(), (a, b)))
