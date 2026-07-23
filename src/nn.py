@@ -7,7 +7,14 @@ from .tensor import (
     cross_entropy,
     mse_loss,
 )
-from .functional import avg_pool2d, conv2d, max_pool2d
+from .functional import (
+    avg_pool1d,
+    avg_pool2d,
+    conv1d,
+    conv2d,
+    max_pool1d,
+    max_pool2d,
+)
 
 
 class Parameter(Tensor):
@@ -346,6 +353,31 @@ class Conv2d(Module):
         return conv2d(x, self.weight, self.bias, self.stride, self.padding)
 
 
+class Conv1d(Module):
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        kernel_size,
+        stride=1,
+        padding=0,
+        bias=True,
+        seed=None,
+    ):
+        super().__init__()
+        bound = 1 / np.sqrt(in_channels * kernel_size)
+        self.stride, self.padding = stride, padding
+        self.weight = Parameter(
+            np.random.default_rng(seed).uniform(
+                -bound, bound, (out_channels, in_channels, kernel_size)
+            )
+        )
+        self.bias = Parameter(np.zeros(out_channels)) if bias else None
+
+    def forward(self, x):
+        return conv1d(x, self.weight, self.bias, self.stride, self.padding)
+
+
 class MaxPool2d(Module):
     def __init__(self, kernel_size, stride=None):
         super().__init__()
@@ -355,9 +387,19 @@ class MaxPool2d(Module):
         return max_pool2d(x, self.kernel_size, self.stride)
 
 
+class MaxPool1d(MaxPool2d):
+    def forward(self, x):
+        return max_pool1d(x, self.kernel_size, self.stride)
+
+
 class AvgPool2d(MaxPool2d):
     def forward(self, x):
         return avg_pool2d(x, self.kernel_size, self.stride)
+
+
+class AvgPool1d(MaxPool2d):
+    def forward(self, x):
+        return avg_pool1d(x, self.kernel_size, self.stride)
 
 
 class MSELoss(Module):

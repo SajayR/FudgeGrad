@@ -87,6 +87,20 @@ def conv2d(x, weight, bias=None, stride=1, padding=0):
     return out
 
 
+def conv1d(x, weight, bias=None, stride=1, padding=0):
+    x = x if isinstance(x, Tensor) else Tensor(x)
+    weight = weight if isinstance(weight, Tensor) else Tensor(weight)
+    if x.ndim != 3 or weight.ndim != 3:
+        raise ValueError("conv1d expects input (N,C,L), weight (O,C,kL)")
+    return conv2d(
+        x.unsqueeze(-2),
+        weight.unsqueeze(-2),
+        bias,
+        stride=(1, stride),
+        padding=(0, padding),
+    ).squeeze(-2)
+
+
 def max_pool2d(x, kernel_size, stride=None):
     x = x if isinstance(x, Tensor) else Tensor(x)
     kh, kw = _pair(kernel_size)
@@ -118,6 +132,17 @@ def max_pool2d(x, kernel_size, stride=None):
     return out
 
 
+def max_pool1d(x, kernel_size, stride=None):
+    x = x if isinstance(x, Tensor) else Tensor(x)
+    if x.ndim != 3:
+        raise ValueError("max_pool1d expects input (N,C,L)")
+    return max_pool2d(
+        x.unsqueeze(-2),
+        (1, kernel_size),
+        None if stride is None else (1, stride),
+    ).squeeze(-2)
+
+
 def avg_pool2d(x, kernel_size, stride=None):
     x = x if isinstance(x, Tensor) else Tensor(x)
     kh, kw = _pair(kernel_size)
@@ -144,3 +169,14 @@ def avg_pool2d(x, kernel_size, stride=None):
 
     out._backward = _backward
     return out
+
+
+def avg_pool1d(x, kernel_size, stride=None):
+    x = x if isinstance(x, Tensor) else Tensor(x)
+    if x.ndim != 3:
+        raise ValueError("avg_pool1d expects input (N,C,L)")
+    return avg_pool2d(
+        x.unsqueeze(-2),
+        (1, kernel_size),
+        None if stride is None else (1, stride),
+    ).squeeze(-2)

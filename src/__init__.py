@@ -15,10 +15,12 @@ from .tensor import (
 )
 from .nn import (
     AvgPool2d,
+    AvgPool1d,
     BatchNorm,
     BCELoss,
     BCEWithLogitsLoss,
     Conv2d,
+    Conv1d,
     CrossEntropyLoss,
     Dropout,
     Embedding,
@@ -27,6 +29,7 @@ from .nn import (
     LeakyReLU,
     Linear,
     MaxPool2d,
+    MaxPool1d,
     Module,
     ModuleList,
     MSELoss,
@@ -40,7 +43,15 @@ from .nn import (
     GELU,
     Identity,
 )
-from .functional import avg_pool2d, conv2d, max_pool2d, pad
+from .functional import (
+    avg_pool1d,
+    avg_pool2d,
+    conv1d,
+    conv2d,
+    max_pool1d,
+    max_pool2d,
+    pad,
+)
 from .optim import Adagrad, Adam, AdamW, RMSprop, SGD, clip_grad_norm_
 
 __all__ = [
@@ -58,8 +69,11 @@ __all__ = [
     "cross_entropy",
     "gradcheck",
     "conv2d",
+    "conv1d",
     "max_pool2d",
+    "max_pool1d",
     "avg_pool2d",
+    "avg_pool1d",
     "pad",
     "Module",
     "ModuleList",
@@ -74,8 +88,11 @@ __all__ = [
     "Tanh",
     "Softmax",
     "Conv2d",
+    "Conv1d",
     "MaxPool2d",
+    "MaxPool1d",
     "AvgPool2d",
+    "AvgPool1d",
     "Sequential",
     "Flatten",
     "Embedding",

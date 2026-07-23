@@ -10,6 +10,7 @@ from src import (
     binary_cross_entropy_with_logits,
     cat,
     conv2d,
+    conv1d,
     clip_grad_norm_,
     gradcheck,
     max_pool2d,
@@ -155,6 +156,11 @@ class TestAutograd(unittest.TestCase):
         self.assertEqual(len(list(layers.parameters())), 4)
         parameters = ParameterList([Parameter([1.0])])
         self.assertEqual(len(list(parameters.parameters())), 1)
+
+    def test_conv1d_gradcheck(self):
+        x = Tensor(np.random.randn(1, 1, 5), requires_grad=True)
+        weight = Tensor(np.random.randn(1, 1, 3), requires_grad=True)
+        self.assertTrue(gradcheck(lambda a, b: conv1d(a, b).sum(), (x, weight)))
 
     def test_activation_and_loss_modules(self):
         model = Sequential(Linear(2, 3, seed=0), ReLU(), Linear(3, 2, seed=1))
