@@ -269,6 +269,9 @@ class Tensor:
         out._backward = _backward
         return out
 
+    def __rpow__(self, base):
+        return Tensor(base) ** self
+
     def __neg__(self):
         out = Tensor(
             -self.data, requires_grad=self.requires_grad, _children=(self,), _op="neg"
@@ -455,6 +458,26 @@ class Tensor:
         out._backward = _backward
         return out
 
+    def cumsum(self, axis=None):
+        data = np.cumsum(self.data, axis=axis)
+        out = Tensor(
+            data, requires_grad=self.requires_grad, _children=(self,), _op="cumsum"
+        )
+
+        def _backward():
+            if out.grad is None or not self.requires_grad:
+                return
+            if axis is None:
+                grad = np.cumsum(out.grad.reshape(-1)[::-1])[::-1].reshape(self.shape)
+            else:
+                grad = np.flip(
+                    np.cumsum(np.flip(out.grad, axis=axis), axis=axis), axis=axis
+                )
+            self.grad += grad
+
+        out._backward = _backward
+        return out
+
     def mean(self, axis=None, keepdims=False):
         axes = _canonicalize_axes(axis, self.ndim)
         count = (
@@ -633,6 +656,12 @@ class Tensor:
 
         out._backward = _backward
         return out
+
+    def log1p(self):
+        return self._unary(np.log1p, lambda x, _: 1 / (1 + x), "log1p")
+
+    def expm1(self):
+        return self._unary(np.expm1, lambda x, _: np.exp(x), "expm1")
 
     def _unary(self, fn, derivative, name):
         data = fn(self.data)

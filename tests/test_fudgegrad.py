@@ -127,6 +127,11 @@ class TestAutograd(unittest.TestCase):
         self.assertFalse(y.requires_grad)
         self.assertEqual(y._prev, ())
 
+    def test_cumulative_and_reverse_power_gradients(self):
+        x = Tensor([1.0, 2.0, 3.0], requires_grad=True)
+        self.assertTrue(gradcheck(lambda a: a.cumsum().sum(), (x,)))
+        self.assertTrue(gradcheck(lambda a: (2**a).sum(), (x,)))
+
     def test_activation_and_loss_modules(self):
         model = Sequential(Linear(2, 3, seed=0), ReLU(), Linear(3, 2, seed=1))
         loss = CrossEntropyLoss()(model(Tensor([[1.0, -1.0]])), [1])
