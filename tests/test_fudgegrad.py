@@ -140,6 +140,13 @@ class TestAutograd(unittest.TestCase):
         np.testing.assert_array_equal(one_hot([0, 2], 3).data, [[1, 0, 0], [0, 0, 1]])
         np.testing.assert_array_equal(Tensor.arange(3).data, [0, 1, 2])
 
+    def test_cast_and_partition_helpers(self):
+        x = Tensor(np.arange(6.0).reshape(2, 3), requires_grad=True)
+        parts = x.split((1, 2), axis=1)
+        self.assertEqual([part.shape for part in parts], [(2, 1), (2, 2)])
+        self.assertTrue(gradcheck(lambda a: a.astype(np.float32).sum(), (x,)))
+        self.assertEqual(len(x.unbind(1)), 3)
+
     def test_activation_and_loss_modules(self):
         model = Sequential(Linear(2, 3, seed=0), ReLU(), Linear(3, 2, seed=1))
         loss = CrossEntropyLoss()(model(Tensor([[1.0, -1.0]])), [1])

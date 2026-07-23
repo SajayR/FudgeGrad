@@ -66,6 +66,10 @@ def _canonicalize_axes(axis, ndim):
     return tuple(sorted(a if a >= 0 else ndim + a for a in axis))
 
 
+def _slice(axis, start, stop):
+    return (slice(None),) * axis + (slice(start, stop),)
+
+
 class Tensor:
     __slots__ = ("data", "requires_grad", "grad", "_backward", "_prev", "_op")
     __array_priority__ = 100
@@ -124,6 +128,21 @@ class Tensor:
     def clone(self, *, requires_grad: Optional[bool] = None) -> "Tensor":
         req = self.requires_grad if requires_grad is None else requires_grad
         return Tensor(self.data.copy(), requires_grad=req)
+
+    def astype(self, dtype):
+        out = Tensor(
+            self.data.astype(dtype),
+            requires_grad=self.requires_grad,
+            _children=(self,),
+            _op="astype",
+        )
+
+        def _backward():
+            if out.grad is not None and self.requires_grad:
+                self.grad += out.grad.astype(_grad_dtype(self.data))
+
+        out._backward = _backward
+        return out
 
     def requires_grad_(self, flag: bool = True) -> "Tensor":
         self.requires_grad = bool(flag)
@@ -405,6 +424,35 @@ class Tensor:
         middle = int(np.prod(self.shape[start : end + 1]))
         suffix = self.shape[end + 1 :]
         return self.reshape(*(prefix + (middle,) + suffix))
+
+    def split(self, sections, axis=0):
+        axis = axis if axis >= 0 else self.ndim + axis
+        if isinstance(sections, int):
+            if sections <= 0:
+                raise ValueError("split size must be positive")
+            return tuple(
+                self[_slice(axis, start, min(start + sections, self.shape[axis]))]
+                for start in range(0, self.shape[axis], sections)
+            )
+        sizes = tuple(sections)
+        if sum(sizes) != self.shape[axis]:
+            raise ValueError("split sizes must sum to the selected dimension")
+        bounds = np.cumsum((0,) + sizes)
+        return tuple(
+            self[_slice(axis, bounds[i], bounds[i + 1])] for i in range(len(sizes))
+        )
+
+    def chunk(self, chunks, axis=0):
+        if chunks <= 0:
+            raise ValueError("chunks must be positive")
+        size = (self.shape[axis] + chunks - 1) // chunks
+        return self.split(size, axis)
+
+    def unbind(self, axis=0):
+        axis = axis if axis >= 0 else self.ndim + axis
+        return tuple(
+            self[_slice(axis, i, i + 1)].squeeze(axis) for i in range(self.shape[axis])
+        )
 
     def permute(self, *axes):
         if len(axes) == 1 and isinstance(axes[0], (tuple, list)):
