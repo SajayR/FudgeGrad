@@ -494,6 +494,23 @@ class Tensor:
         out._backward = _backward
         return out
 
+    def _unary(self, fn, derivative, name):
+        data = fn(self.data)
+        out = Tensor(data, requires_grad=self.requires_grad, _children=(self,), _op=name)
+        def _backward():
+            if out.grad is not None and self.requires_grad: self.grad += out.grad * derivative(self.data, data)
+        out._backward = _backward
+        return out
+
+    def sin(self): return self._unary(np.sin, lambda x, _: np.cos(x), "sin")
+    def cos(self): return self._unary(np.cos, lambda x, _: -np.sin(x), "cos")
+    def tan(self): return self._unary(np.tan, lambda x, _: 1 / np.cos(x) ** 2, "tan")
+    def sinh(self): return self._unary(np.sinh, lambda x, _: np.cosh(x), "sinh")
+    def cosh(self): return self._unary(np.cosh, lambda x, _: np.sinh(x), "cosh")
+    def asin(self): return self._unary(np.arcsin, lambda x, _: 1 / np.sqrt(1 - x * x), "asin")
+    def acos(self): return self._unary(np.arccos, lambda x, _: -1 / np.sqrt(1 - x * x), "acos")
+    def atan(self): return self._unary(np.arctan, lambda x, _: 1 / (1 + x * x), "atan")
+
     def tanh(self):
         data = np.tanh(self.data)
         out = Tensor(data, requires_grad=self.requires_grad, _children=(self,), _op="tanh")
@@ -515,6 +532,21 @@ class Tensor:
 
         out._backward = _backward
         return out
+
+    def leaky_relu(self, negative_slope=0.01):
+        return self._unary(lambda x: np.where(x > 0, x, negative_slope * x), lambda x, _: np.where(x > 0, 1, negative_slope), "leaky_relu")
+
+    def elu(self, alpha=1.0):
+        return self._unary(lambda x: np.where(x > 0, x, alpha * np.expm1(x)), lambda x, y: np.where(x > 0, 1, y + alpha), "elu")
+
+    def softplus(self):
+        return self._unary(lambda x: np.logaddexp(0, x), lambda x, _: 1 / (1 + np.exp(-x)), "softplus")
+
+    def gelu(self):
+        c, k = np.sqrt(2 / np.pi), 0.044715
+        return self._unary(lambda x: .5 * x * (1 + np.tanh(c * (x + k * x ** 3))), lambda x, _: .5 * (1 + np.tanh(c * (x + k * x ** 3))) + .5 * x * (1 - np.tanh(c * (x + k * x ** 3)) ** 2) * c * (1 + 3 * k * x ** 2), "gelu")
+
+    def swish(self): return self * self.sigmoid()
 
     def sigmoid(self):
         data = 1 / (1 + np.exp(-self.data))
@@ -569,6 +601,36 @@ class Tensor:
 
         out._backward = _backward
         return out
+
+    def max(self, axis=None, keepdims=False):
+        data = self.data.max(axis=axis, keepdims=keepdims); axes = _canonicalize_axes(axis, self.ndim)
+        out = Tensor(data, requires_grad=self.requires_grad, _children=(self,), _op="max")
+        def _backward():
+            if out.grad is None or not self.requires_grad: return
+            value, grad = data, out.grad
+            if axes is None: value, grad = np.asarray(value).reshape((1,) * self.ndim), np.asarray(grad).reshape((1,) * self.ndim)
+            elif not keepdims:
+                for ax in axes: value, grad = np.expand_dims(value, ax), np.expand_dims(grad, ax)
+            mask = self.data == value
+            self.grad += mask * grad / mask.sum(axis=axes, keepdims=True)
+        out._backward = _backward; return out
+
+    def min(self, axis=None, keepdims=False): return (-self).max(axis=axis, keepdims=keepdims).__neg__()
+
+    def prod(self, axis=None, keepdims=False):
+        data = self.data.prod(axis=axis, keepdims=keepdims); axes = _canonicalize_axes(axis, self.ndim)
+        out = Tensor(data, requires_grad=self.requires_grad, _children=(self,), _op="prod")
+        def _backward():
+            if out.grad is None or not self.requires_grad: return
+            value, grad = data, out.grad
+            if axes is None: value, grad = np.asarray(value).reshape((1,) * self.ndim), np.asarray(grad).reshape((1,) * self.ndim)
+            elif not keepdims:
+                for ax in axes: value, grad = np.expand_dims(value, ax), np.expand_dims(grad, ax)
+            zeros = self.data == 0; count = zeros.sum(axis=axes, keepdims=True)
+            safe = np.where(zeros, 1, self.data); base = safe.prod(axis=axes, keepdims=True)
+            quotient = np.divide(value, self.data, out=np.zeros_like(self.data, dtype=_grad_dtype(self.data)), where=~zeros)
+            self.grad += grad * np.where(count == 0, quotient, np.where(count == 1, zeros * base, 0))
+        out._backward = _backward; return out
 
     def maximum(self, other):
         other_tensor = other if isinstance(other, Tensor) else None
@@ -644,6 +706,12 @@ class Tensor:
 
         out._backward = _backward
         return out
+
+    def flip(self, axis=None):
+        data = np.flip(self.data, axis); out = Tensor(data, requires_grad=self.requires_grad, _children=(self,), _op="flip")
+        def _backward():
+            if out.grad is not None and self.requires_grad: self.grad += np.flip(out.grad, axis)
+        out._backward = _backward; return out
 
     @staticmethod
     def zeros(shape, *, dtype=None, requires_grad=False):
