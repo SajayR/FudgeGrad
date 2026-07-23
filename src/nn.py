@@ -315,6 +315,43 @@ class RNN(Module):
         return stack(states, axis=1), hidden
 
 
+class LSTM(Module):
+    def __init__(self, input_size, hidden_size, bias=True, seed=None):
+        super().__init__()
+        rng = np.random.default_rng(seed)
+        bound = 1 / np.sqrt(hidden_size)
+        self.hidden_size = hidden_size
+        self.weight_ih = Parameter(
+            rng.uniform(-bound, bound, (4 * hidden_size, input_size))
+        )
+        self.weight_hh = Parameter(
+            rng.uniform(-bound, bound, (4 * hidden_size, hidden_size))
+        )
+        self.bias = Parameter(np.zeros(4 * hidden_size)) if bias else None
+
+    def forward(self, x, state=None):
+        if x.ndim != 3:
+            raise ValueError("LSTM expects input shaped (N, L, C)")
+        if state is None:
+            hidden = cell = Tensor.zeros((x.shape[0], self.hidden_size))
+        else:
+            hidden, cell = state
+        states = []
+        for step in range(x.shape[1]):
+            gates = x[:, step] @ self.weight_ih.T + hidden @ self.weight_hh.T
+            if self.bias is not None:
+                gates = gates + self.bias
+            input_gate, forget_gate, cell_gate, output_gate = gates.split(
+                self.hidden_size, -1
+            )
+            cell = (
+                forget_gate.sigmoid() * cell + input_gate.sigmoid() * cell_gate.tanh()
+            )
+            hidden = output_gate.sigmoid() * cell.tanh()
+            states.append(hidden)
+        return stack(states, axis=1), (hidden, cell)
+
+
 class Embedding(Module):
     def __init__(self, num_embeddings, embedding_dim, seed=None):
         super().__init__()

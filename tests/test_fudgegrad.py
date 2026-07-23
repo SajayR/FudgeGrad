@@ -23,6 +23,7 @@ from src import (
     pad,
     scaled_dot_product_attention,
     Linear,
+    LSTM,
     ModuleList,
     MultiheadAttention,
     Parameter,
@@ -205,6 +206,12 @@ class TestAutograd(unittest.TestCase):
         self.assertEqual(output.shape, (2, 4, 3))
         output.sum().backward()
         self.assertEqual(hidden.shape, (2, 3))
+
+    def test_lstm_network(self):
+        network = LSTM(2, 3, seed=0)
+        output, (hidden, cell) = network(Tensor(np.random.randn(2, 4, 2)))
+        output.sum().backward()
+        self.assertEqual((hidden.shape, cell.shape), ((2, 3), (2, 3)))
 
     def test_activation_and_loss_modules(self):
         model = Sequential(Linear(2, 3, seed=0), ReLU(), Linear(3, 2, seed=1))
