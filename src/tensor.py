@@ -7,6 +7,12 @@ def _to_array(data, dtype=None) -> np.ndarray:
     return np.asarray(data, dtype=dtype)
 
 
+def _grad_dtype(data) -> np.dtype:
+    """A differentiable integer tensor still needs floating-point cotangents."""
+    dtype = np.asarray(data).dtype
+    return dtype if dtype.kind in "fc" else np.dtype(float)
+
+
 def _sum_to_shape(grad: np.ndarray, shape: Sequence[int]) -> np.ndarray:
     grad = np.asarray(grad)
     shape = tuple(shape)
@@ -41,7 +47,7 @@ class Tensor:
             data = data.data
         self.data = _to_array(data, dtype=dtype)
         self.requires_grad = bool(requires_grad)
-        self.grad = np.zeros_like(self.data, dtype=self.data.dtype) if self.requires_grad else None
+        self.grad = np.zeros_like(self.data, dtype=_grad_dtype(self.data)) if self.requires_grad else None
         self._backward = lambda: None
         self._prev = tuple(_children)
         self._op = _op
@@ -79,7 +85,7 @@ class Tensor:
 
     def requires_grad_(self, flag: bool = True) -> "Tensor":
         self.requires_grad = bool(flag)
-        self.grad = np.zeros_like(self.data, dtype=self.data.dtype) if self.requires_grad else None
+        self.grad = np.zeros_like(self.data, dtype=_grad_dtype(self.data)) if self.requires_grad else None
         return self
 
     def zero_grad(self) -> None:
@@ -92,7 +98,9 @@ class Tensor:
                 raise RuntimeError("grad must be specified for non-scalar outputs")
             grad = np.ones_like(self.data, dtype=self.data.dtype)
         else:
-            grad = _to_array(grad, dtype=self.data.dtype)
+            grad = _to_array(grad, dtype=_grad_dtype(self.data))
+        if grad.shape != self.shape:
+            raise ValueError(f"gradient shape {grad.shape} does not match output shape {self.shape}")
         topo, visited = [], set()
 
         def build(v: "Tensor"):
@@ -104,11 +112,11 @@ class Tensor:
 
         build(self)
         if self.requires_grad:
-            self.grad = self.grad if self.grad is not None else np.zeros_like(self.data, dtype=self.data.dtype)
+            self.grad = self.grad if self.grad is not None else np.zeros_like(self.data, dtype=_grad_dtype(self.data))
             self.grad += grad
         for node in reversed(topo):
             if node.requires_grad and node.grad is None:
-                node.grad = np.zeros_like(node.data, dtype=node.data.dtype)
+                node.grad = np.zeros_like(node.data, dtype=_grad_dtype(node.data))
             node._backward()
 
     def _binary_op(self, other, op, grad_self, grad_other, name):
@@ -204,10 +212,19 @@ class Tensor:
         def _backward():
             if out.grad is None:
                 return
+            a, b, g = self.data, other_tensor.data, out.grad
+            a_vector, b_vector = a.ndim == 1, b.ndim == 1
+            a = a[None, :] if a_vector else a
+            b = b[:, None] if b_vector else b
+            if a_vector and b_vector: g = g.reshape(g.shape + (1, 1))
+            elif a_vector: g = np.expand_dims(g, -2)
+            elif b_vector: g = np.expand_dims(g, -1)
             if self.requires_grad:
-                self.grad += out.grad @ other_tensor.data.swapaxes(-1, -2)
+                ga = g @ b.swapaxes(-1, -2)
+                self.grad += _sum_to_shape(np.squeeze(ga, -2) if a_vector else ga, self.shape)
             if other_tensor.requires_grad:
-                other_tensor.grad += self.data.swapaxes(-1, -2) @ out.grad
+                gb = a.swapaxes(-1, -2) @ g
+                other_tensor.grad += _sum_to_shape(np.squeeze(gb, -1) if b_vector else gb, other_tensor.shape)
 
         out._backward = _backward
         return out
@@ -621,8 +638,8 @@ class Tensor:
         def _backward():
             if out.grad is None or not self.requires_grad:
                 return
-            grad = np.zeros_like(self.data)
-            grad[idx] = out.grad
+            grad = np.zeros_like(self.data, dtype=_grad_dtype(self.data))
+            np.add.at(grad, idx, out.grad)
             self.grad += grad
 
         out._backward = _backward
@@ -698,11 +715,10 @@ def cat(tensors: Sequence[Tensor], axis=0):
             return
         start = 0
         for size, t in zip(sizes, tensors):
-            if not t.requires_grad:
-                continue
             slc = [slice(None)] * out.grad.ndim
             slc[axis] = slice(start, size)
-            t.grad += out.grad[tuple(slc)]
+            if t.requires_grad:
+                t.grad += out.grad[tuple(slc)]
             start = size
 
     out._backward = _backward
