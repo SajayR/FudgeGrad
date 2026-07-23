@@ -328,6 +328,35 @@ class BatchNorm(Module):
         )
 
 
+class GroupNorm(Module):
+    def __init__(self, num_groups, num_channels, eps=1e-5, affine=True):
+        if num_channels % num_groups:
+            raise ValueError("num_channels must be divisible by num_groups")
+        super().__init__()
+        self.num_groups, self.num_channels, self.eps = num_groups, num_channels, eps
+        self.weight = Parameter(np.ones(num_channels)) if affine else None
+        self.bias = Parameter(np.zeros(num_channels)) if affine else None
+
+    def forward(self, x):
+        if x.ndim < 2 or x.shape[1] != self.num_channels:
+            raise ValueError("GroupNorm expects shape (N, C, ...)")
+        shape = x.shape
+        grouped = x.reshape(shape[0], self.num_groups, -1)
+        y = (grouped - grouped.mean(-1, True)) / (
+            grouped.var(-1, True) + self.eps
+        ).sqrt()
+        y = y.reshape(shape)
+        if self.weight is None:
+            return y
+        affine_shape = (1, -1) + (1,) * (x.ndim - 2)
+        return y * self.weight.reshape(affine_shape) + self.bias.reshape(affine_shape)
+
+
+class InstanceNorm(GroupNorm):
+    def __init__(self, num_channels, eps=1e-5, affine=True):
+        super().__init__(num_channels, num_channels, eps, affine)
+
+
 class Conv2d(Module):
     def __init__(
         self,

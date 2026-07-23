@@ -5,6 +5,7 @@ from src import (
     AdamW,
     BatchNorm,
     CrossEntropyLoss,
+    GroupNorm,
     Embedding,
     Tensor,
     binary_cross_entropy_with_logits,
@@ -166,6 +167,11 @@ class TestAutograd(unittest.TestCase):
     def test_huber_loss_gradcheck(self):
         x = Tensor([-2.0, 0.2, 3.0], requires_grad=True)
         self.assertTrue(gradcheck(lambda a: huber_loss(a, [0, 0, 0]), (x,)))
+
+    def test_group_norm_gradcheck(self):
+        layer = GroupNorm(2, 4)
+        x = Tensor(np.random.randn(2, 4, 3), requires_grad=True)
+        self.assertTrue(gradcheck(lambda a: layer(a).sum(), (x,)))
 
     def test_activation_and_loss_modules(self):
         model = Sequential(Linear(2, 3, seed=0), ReLU(), Linear(3, 2, seed=1))
