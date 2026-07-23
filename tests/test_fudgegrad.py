@@ -20,6 +20,7 @@ from src import (
     no_grad,
     one_hot,
     pad,
+    scaled_dot_product_attention,
     Linear,
     ModuleList,
     Parameter,
@@ -172,6 +173,16 @@ class TestAutograd(unittest.TestCase):
         layer = GroupNorm(2, 4)
         x = Tensor(np.random.randn(2, 4, 3), requires_grad=True)
         self.assertTrue(gradcheck(lambda a: layer(a).sum(), (x,)))
+
+    def test_scaled_dot_product_attention_gradcheck(self):
+        q = Tensor(np.random.randn(1, 2, 3), requires_grad=True)
+        k = Tensor(np.random.randn(1, 2, 3), requires_grad=True)
+        v = Tensor(np.random.randn(1, 2, 4), requires_grad=True)
+        self.assertTrue(
+            gradcheck(
+                lambda a, b, c: scaled_dot_product_attention(a, b, c).sum(), (q, k, v)
+            )
+        )
 
     def test_activation_and_loss_modules(self):
         model = Sequential(Linear(2, 3, seed=0), ReLU(), Linear(3, 2, seed=1))

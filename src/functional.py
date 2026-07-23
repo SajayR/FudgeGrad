@@ -1,5 +1,5 @@
 import numpy as np
-from .tensor import Tensor, _grad_dtype, _sum_to_shape
+from .tensor import Tensor, _grad_dtype, _sum_to_shape, where
 
 
 def _pair(x):
@@ -31,6 +31,20 @@ def pad(x, pad_width, value=0):
 
     out._backward = _backward
     return out
+
+
+def scaled_dot_product_attention(query, key, value, mask=None):
+    query = query if isinstance(query, Tensor) else Tensor(query)
+    key = key if isinstance(key, Tensor) else Tensor(key)
+    value = value if isinstance(value, Tensor) else Tensor(value)
+    if query.shape[-1] != key.shape[-1]:
+        raise ValueError("query and key feature dimensions must match")
+    axes = list(range(key.ndim))
+    axes[-1], axes[-2] = axes[-2], axes[-1]
+    scores = query @ key.transpose(axes) / np.sqrt(query.shape[-1])
+    if mask is not None:
+        scores = where(mask, scores, -np.inf)
+    return scores.softmax(-1) @ value
 
 
 def conv2d(x, weight, bias=None, stride=1, padding=0):

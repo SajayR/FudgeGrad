@@ -346,6 +346,8 @@ class Tensor:
         return self.transpose()
 
     def transpose(self, *axes):
+        if len(axes) == 1 and isinstance(axes[0], (tuple, list)):
+            axes = tuple(axes[0])
         data = self.data.transpose(*axes) if axes else self.data.T
         out = Tensor(
             data, requires_grad=self.requires_grad, _children=(self,), _op="transpose"
@@ -354,7 +356,7 @@ class Tensor:
 
         def _backward():
             if out.grad is not None and self.requires_grad:
-                inv = np.argsort(axes)
+                inv = tuple(np.argsort(axes))
                 self.grad += out.grad.transpose(inv)
 
         out._backward = _backward

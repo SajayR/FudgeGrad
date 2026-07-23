@@ -57,6 +57,7 @@ from .functional import (
     max_pool1d,
     max_pool2d,
     pad,
+    scaled_dot_product_attention,
 )
 from .optim import Adagrad, Adam, AdamW, RMSprop, SGD, clip_grad_norm_
 
@@ -83,6 +84,7 @@ __all__ = [
     "avg_pool2d",
     "avg_pool1d",
     "pad",
+    "scaled_dot_product_attention",
     "Module",
     "ModuleList",
     "Parameter",
