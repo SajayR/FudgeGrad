@@ -2,6 +2,7 @@
 from collections import OrderedDict
 import numpy as np
 from .tensor import Tensor
+from .functional import avg_pool2d, conv2d, max_pool2d
 
 
 class Parameter(Tensor):
@@ -9,7 +10,7 @@ class Parameter(Tensor):
 
 
 class Module:
-    def __init__(self): object.__setattr__(self, "training", True)
+    def __init__(self): object.__setattr__(self, "training", True); object.__setattr__(self, "_buffers", {})
     def __setattr__(self, name, value): object.__setattr__(self, name, value)
     def __call__(self, *args, **kwargs): return self.forward(*args, **kwargs)
     def forward(self, *args, **kwargs): raise NotImplementedError
@@ -27,6 +28,15 @@ class Module:
         for name, p in self._named():
             if id(p) not in seen: seen.add(id(p)); yield name, p
     def parameters(self): return (p for _, p in self.named_parameters())
+    def register_buffer(self, name, value): self._buffers[name] = value; setattr(self, name, value); return value
+    def named_buffers(self, prefix=""):
+        for name, value in self._buffers.items(): yield (f"{prefix}.{name}" if prefix else name), value
+        for name, value in self.__dict__.items():
+            key = f"{prefix}.{name}" if prefix else name
+            if isinstance(value, Module): yield from value.named_buffers(key)
+            elif isinstance(value, (list, tuple)):
+                for i, item in enumerate(value):
+                    if isinstance(item, Module): yield from item.named_buffers(f"{key}.{i}")
     def modules(self):
         yield self
         for value in self.__dict__.values():
@@ -40,13 +50,14 @@ class Module:
     def eval(self): return self.train(False)
     def zero_grad(self):
         for p in self.parameters(): p.zero_grad()
-    def state_dict(self): return OrderedDict((name, p.data.copy()) for name, p in self.named_parameters())
+    def state_dict(self): return OrderedDict([(name, p.data.copy()) for name, p in self.named_parameters()] + [(name, value.copy()) for name, value in self.named_buffers()])
     def load_state_dict(self, state):
-        expected = dict(self.named_parameters())
+        expected = dict(self.named_parameters()); expected.update(self.named_buffers())
         if set(state) != set(expected): raise ValueError(f"state keys differ: missing={set(expected)-set(state)}, unexpected={set(state)-set(expected)}")
         for name, p in expected.items():
-            if p.shape != np.shape(state[name]): raise ValueError(f"shape mismatch for {name}: {p.shape} != {np.shape(state[name])}")
-            p.data[...] = state[name]
+            shape = p.shape if isinstance(p, Tensor) else p.shape
+            if shape != np.shape(state[name]): raise ValueError(f"shape mismatch for {name}: {shape} != {np.shape(state[name])}")
+            (p.data if isinstance(p, Tensor) else p)[...] = state[name]
         return self
 
 
@@ -94,13 +105,29 @@ class LayerNorm(Module):
 
 class BatchNorm(Module):
     def __init__(self, num_features, eps=1e-5, momentum=.1, affine=True):
-        super().__init__(); self.eps, self.momentum = eps, momentum; self.weight = Parameter(np.ones(num_features)) if affine else None; self.bias = Parameter(np.zeros(num_features)) if affine else None; self.running_mean = np.zeros(num_features); self.running_var = np.ones(num_features)
+        super().__init__(); self.eps, self.momentum = eps, momentum; self.weight = Parameter(np.ones(num_features)) if affine else None; self.bias = Parameter(np.zeros(num_features)) if affine else None; self.register_buffer("running_mean", np.zeros(num_features)); self.register_buffer("running_var", np.ones(num_features))
     def forward(self, x):
         if x.ndim < 2: raise ValueError("BatchNorm expects shape (N, C, ...)")
         axes = (0,) + tuple(range(2, x.ndim)); shape = (1, -1) + (1,) * (x.ndim - 2)
         if self.training:
             mean, var = x.mean(axes, True), x.var(axes, True)
-            self.running_mean = (1-self.momentum)*self.running_mean + self.momentum*mean.data.reshape(-1); self.running_var = (1-self.momentum)*self.running_var + self.momentum*var.data.reshape(-1)
+            self.running_mean *= 1-self.momentum; self.running_mean += self.momentum*mean.data.reshape(-1); self.running_var *= 1-self.momentum; self.running_var += self.momentum*var.data.reshape(-1)
         else: mean, var = Tensor(self.running_mean.reshape(shape)), Tensor(self.running_var.reshape(shape))
         y = (x - mean) / (var + self.eps).sqrt()
         return y * self.weight.reshape(shape) + self.bias.reshape(shape) if self.weight is not None else y
+
+
+class Conv2d(Module):
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, bias=True, seed=None):
+        super().__init__(); kh, kw = (kernel_size, kernel_size) if isinstance(kernel_size, int) else kernel_size; bound = 1 / np.sqrt(in_channels * kh * kw); rng = np.random.default_rng(seed)
+        self.stride, self.padding = stride, padding; self.weight = Parameter(rng.uniform(-bound, bound, (out_channels, in_channels, kh, kw))); self.bias = Parameter(np.zeros(out_channels)) if bias else None
+    def forward(self, x): return conv2d(x, self.weight, self.bias, self.stride, self.padding)
+
+
+class MaxPool2d(Module):
+    def __init__(self, kernel_size, stride=None): super().__init__(); self.kernel_size, self.stride = kernel_size, stride
+    def forward(self, x): return max_pool2d(x, self.kernel_size, self.stride)
+
+
+class AvgPool2d(MaxPool2d):
+    def forward(self, x): return avg_pool2d(x, self.kernel_size, self.stride)

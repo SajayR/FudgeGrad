@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from src import Adam, BatchNorm, Embedding, Linear, Tensor, cat, gradcheck, mse_loss
+from src import Adam, BatchNorm, Embedding, Tensor, binary_cross_entropy_with_logits, cat, conv2d, gradcheck, max_pool2d, mse_loss, Linear
 
 
 class TestAutograd(unittest.TestCase):
@@ -37,6 +37,18 @@ class TestAutograd(unittest.TestCase):
     def test_batchnorm_eval(self):
         layer = BatchNorm(2); layer(Tensor(np.ones((4, 2)))); layer.eval()
         self.assertEqual(layer(Tensor(np.ones((3, 2)))).shape, (3, 2))
+
+    def test_batchnorm_state_includes_running_statistics(self):
+        layer = BatchNorm(2); layer(Tensor([[1., 2.], [3., 4.]])); state = layer.state_dict(); layer.running_mean[:] = 99; layer.load_state_dict(state)
+        np.testing.assert_allclose(layer.running_mean, state["running_mean"])
+
+    def test_conv_and_pool_gradchecks(self):
+        x, w = Tensor(np.random.randn(1, 1, 4, 4), requires_grad=True), Tensor(np.random.randn(1, 1, 2, 2), requires_grad=True)
+        self.assertTrue(gradcheck(lambda a, b: conv2d(a, b).sum(), (x, w)))
+        self.assertTrue(gradcheck(lambda a: max_pool2d(a, 2).sum(), (Tensor(np.random.randn(1, 1, 4, 4), requires_grad=True),)))
+
+    def test_logits_bce(self):
+        x = Tensor([-2., 0., 2.], requires_grad=True); self.assertTrue(gradcheck(lambda a: binary_cross_entropy_with_logits(a, [0, 1, 1]), (x,)))
 
 
 if __name__ == "__main__": unittest.main()

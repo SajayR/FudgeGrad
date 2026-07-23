@@ -93,6 +93,8 @@ class Tensor:
             self.grad.fill(0)
 
     def backward(self, grad=None) -> None:
+        if not self.requires_grad:
+            raise RuntimeError("cannot call backward on a tensor that does not require gradients")
         if grad is None:
             if self.data.size != 1:
                 raise RuntimeError("grad must be specified for non-scalar outputs")
@@ -807,18 +809,37 @@ def mse_loss(pred: Tensor, target: Tensor, reduction: str = "mean") -> Tensor:
     return loss.mean()
 
 
-def cross_entropy(logits: Tensor, targets, axis=-1):
+def _reduce(loss, reduction):
+    if reduction == "none": return loss
+    if reduction == "sum": return loss.sum()
+    if reduction == "mean": return loss.mean()
+    raise ValueError("reduction must be 'none', 'sum', or 'mean'")
+
+
+def binary_cross_entropy(input: Tensor, target, reduction="mean", eps=1e-12):
+    target = target if isinstance(target, Tensor) else Tensor(target)
+    p = input.clip(eps, 1 - eps)
+    return _reduce(-(target * p.log() + (1 - target) * (1 - p).log()), reduction)
+
+
+def binary_cross_entropy_with_logits(logits: Tensor, target, reduction="mean"):
+    target = target if isinstance(target, Tensor) else Tensor(target)
+    return _reduce(logits.softplus() - logits * target, reduction)
+
+
+def cross_entropy(logits: Tensor, targets, axis=-1, reduction="mean"):
     if not isinstance(targets, Tensor):
         targets = Tensor(np.array(targets), requires_grad=False)
     log_probs = logits.log_softmax(axis=axis)
+    axis = axis if axis >= 0 else log_probs.ndim + axis
+    if not 0 <= axis < log_probs.ndim: raise ValueError("invalid class axis")
     if targets.data.ndim == log_probs.data.ndim:
-        return (-(targets * log_probs).sum(axis=axis)).mean()
-    if axis not in (-1, log_probs.ndim - 1):
-        raise ValueError("cross_entropy currently expects reduction over the last axis")
+        return _reduce(-(targets * log_probs).sum(axis=axis), reduction)
     num_classes = log_probs.data.shape[axis]
     one_hot = np.eye(num_classes, dtype=log_probs.data.dtype)[targets.data.astype(int)]
+    if axis != log_probs.ndim - 1: one_hot = np.moveaxis(one_hot, -1, axis)
     target_tensor = Tensor(one_hot, requires_grad=False)
-    return (-(target_tensor * log_probs).sum(axis=axis)).mean()
+    return _reduce(-(target_tensor * log_probs).sum(axis=axis), reduction)
 
 
 def gradcheck(fn, inputs: Sequence[Tensor], eps=1e-4, atol=1e-4, rtol=1e-2):
@@ -864,6 +885,8 @@ __all__ = [
     "stack",
     "cat",
     "mse_loss",
+    "binary_cross_entropy",
+    "binary_cross_entropy_with_logits",
     "cross_entropy",
     "gradcheck",
 ]
