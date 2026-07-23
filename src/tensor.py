@@ -1156,6 +1156,25 @@ def mse_loss(pred: Tensor, target: Tensor, reduction: str = "mean") -> Tensor:
     return loss.mean()
 
 
+def l1_loss(pred: Tensor, target: Tensor, reduction: str = "mean") -> Tensor:
+    return _reduce((pred - target).abs(), reduction)
+
+
+def huber_loss(
+    pred: Tensor, target: Tensor, delta=1.0, reduction: str = "mean"
+) -> Tensor:
+    if delta <= 0:
+        raise ValueError("delta must be positive")
+    diff = pred - target
+    absolute = diff.abs()
+    loss = where(
+        absolute.data <= delta,
+        0.5 * diff * diff / delta,
+        absolute - 0.5 * delta,
+    )
+    return _reduce(loss, reduction)
+
+
 def _reduce(loss, reduction):
     if reduction == "none":
         return loss
@@ -1246,6 +1265,8 @@ __all__ = [
     "stack",
     "cat",
     "mse_loss",
+    "l1_loss",
+    "huber_loss",
     "binary_cross_entropy",
     "binary_cross_entropy_with_logits",
     "cross_entropy",

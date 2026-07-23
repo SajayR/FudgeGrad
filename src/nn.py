@@ -5,6 +5,8 @@ from .tensor import (
     binary_cross_entropy,
     binary_cross_entropy_with_logits,
     cross_entropy,
+    huber_loss,
+    l1_loss,
     mse_loss,
 )
 from .functional import (
@@ -409,6 +411,20 @@ class MSELoss(Module):
 
     def forward(self, input, target):
         return mse_loss(input, target, self.reduction)
+
+
+class L1Loss(MSELoss):
+    def forward(self, input, target):
+        return l1_loss(input, target, self.reduction)
+
+
+class HuberLoss(MSELoss):
+    def __init__(self, delta=1.0, reduction="mean"):
+        super().__init__(reduction)
+        self.delta = delta
+
+    def forward(self, input, target):
+        return huber_loss(input, target, self.delta, self.reduction)
 
 
 class BCELoss(Module):

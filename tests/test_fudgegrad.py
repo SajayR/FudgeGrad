@@ -15,6 +15,7 @@ from src import (
     gradcheck,
     max_pool2d,
     mse_loss,
+    huber_loss,
     no_grad,
     one_hot,
     pad,
@@ -161,6 +162,10 @@ class TestAutograd(unittest.TestCase):
         x = Tensor(np.random.randn(1, 1, 5), requires_grad=True)
         weight = Tensor(np.random.randn(1, 1, 3), requires_grad=True)
         self.assertTrue(gradcheck(lambda a, b: conv1d(a, b).sum(), (x, weight)))
+
+    def test_huber_loss_gradcheck(self):
+        x = Tensor([-2.0, 0.2, 3.0], requires_grad=True)
+        self.assertTrue(gradcheck(lambda a: huber_loss(a, [0, 0, 0]), (x,)))
 
     def test_activation_and_loss_modules(self):
         model = Sequential(Linear(2, 3, seed=0), ReLU(), Linear(3, 2, seed=1))
