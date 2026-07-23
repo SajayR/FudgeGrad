@@ -5,6 +5,7 @@ from src import (
     AdamW,
     BatchNorm,
     CrossEntropyLoss,
+    CosineAnnealingLR,
     GroupNorm,
     Embedding,
     Tensor,
@@ -190,6 +191,12 @@ class TestAutograd(unittest.TestCase):
         x = Tensor(np.random.randn(2, 3, 4))
         layer(x).sum().backward()
         self.assertTrue(all(p.grad is not None for p in layer.parameters()))
+
+    def test_learning_rate_schedulers(self):
+        optimizer = Adam([Tensor([1.0], requires_grad=True)], lr=1)
+        scheduler = CosineAnnealingLR(optimizer, 2, eta_min=0)
+        self.assertAlmostEqual(scheduler.step(), 0.5)
+        self.assertAlmostEqual(scheduler.step(), 0)
 
     def test_activation_and_loss_modules(self):
         model = Sequential(Linear(2, 3, seed=0), ReLU(), Linear(3, 2, seed=1))

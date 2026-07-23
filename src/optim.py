@@ -1,6 +1,53 @@
 import numpy as np
 
 
+class LRScheduler:
+    def __init__(self, optimizer):
+        self.optimizer = optimizer
+        self.base_lr = optimizer.lr
+        self.last_epoch = 0
+
+    def step(self):
+        self.last_epoch += 1
+        self.optimizer.lr = self.get_lr()
+        return self.optimizer.lr
+
+
+class StepLR(LRScheduler):
+    def __init__(self, optimizer, step_size, gamma=0.1):
+        if step_size <= 0:
+            raise ValueError("step_size must be positive")
+        super().__init__(optimizer)
+        self.step_size, self.gamma = step_size, gamma
+
+    def get_lr(self):
+        return self.base_lr * self.gamma ** (self.last_epoch // self.step_size)
+
+
+class ExponentialLR(LRScheduler):
+    def __init__(self, optimizer, gamma):
+        super().__init__(optimizer)
+        self.gamma = gamma
+
+    def get_lr(self):
+        return self.base_lr * self.gamma**self.last_epoch
+
+
+class CosineAnnealingLR(LRScheduler):
+    def __init__(self, optimizer, t_max, eta_min=0.0):
+        if t_max <= 0:
+            raise ValueError("t_max must be positive")
+        super().__init__(optimizer)
+        self.t_max, self.eta_min = t_max, eta_min
+
+    def get_lr(self):
+        phase = min(self.last_epoch, self.t_max) / self.t_max
+        return (
+            self.eta_min
+            + (self.base_lr - self.eta_min) * (1 + np.cos(np.pi * phase)) / 2
+        )
+
+
 class Optimizer:
     def __init__(self, params):
         self.params = list(dict.fromkeys(params))

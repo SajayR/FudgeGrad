@@ -60,7 +60,17 @@ from .functional import (
     pad,
     scaled_dot_product_attention,
 )
-from .optim import Adagrad, Adam, AdamW, RMSprop, SGD, clip_grad_norm_
+from .optim import (
+    Adagrad,
+    Adam,
+    AdamW,
+    CosineAnnealingLR,
+    ExponentialLR,
+    RMSprop,
+    SGD,
+    StepLR,
+    clip_grad_norm_,
+)
 
 __all__ = [
     "Tensor",
@@ -124,5 +134,8 @@ __all__ = [
     "AdamW",
     "Adagrad",
     "RMSprop",
+    "StepLR",
+    "ExponentialLR",
+    "CosineAnnealingLR",
     "clip_grad_norm_",
 ]
