@@ -75,6 +75,34 @@ class Adam(Optimizer):
             )
 
 
+class AdamW(Adam):
+    """Adam with decoupled weight decay."""
+
+    def step(self):
+        self.t += 1
+        b1, b2 = self.betas
+        for p in self.params:
+            if p.grad is None:
+                continue
+            m, v = self.state.setdefault(
+                id(p),
+                [
+                    np.zeros_like(p.data, dtype=float),
+                    np.zeros_like(p.data, dtype=float),
+                ],
+            )
+            m *= b1
+            m += (1 - b1) * p.grad
+            v *= b2
+            v += (1 - b2) * p.grad * p.grad
+            p.data *= 1 - self.lr * self.weight_decay
+            p.data -= (
+                self.lr
+                * (m / (1 - b1**self.t))
+                / (np.sqrt(v / (1 - b2**self.t)) + self.eps)
+            )
+
+
 class RMSprop(Optimizer):
     def __init__(
         self, params, lr=1e-2, alpha=0.99, eps=1e-8, weight_decay=0.0, momentum=0.0
@@ -109,3 +137,37 @@ class RMSprop(Optimizer):
                 buf += step
                 step = buf
             p.data -= self.lr * step
+
+
+class Adagrad(Optimizer):
+    def __init__(self, params, lr=1e-2, eps=1e-10, weight_decay=0.0):
+        super().__init__(params)
+        self.lr, self.eps, self.weight_decay, self.state = lr, eps, weight_decay, {}
+
+    def step(self):
+        for p in self.params:
+            if p.grad is None:
+                continue
+            g = p.grad + self.weight_decay * p.data
+            total = self.state.setdefault(id(p), np.zeros_like(p.data, dtype=float))
+            total += g * g
+            p.data -= self.lr * g / (np.sqrt(total) + self.eps)
+
+
+def clip_grad_norm_(parameters, max_norm, norm_type=2.0):
+    """Clip gradients in-place and return their pre-clipping norm."""
+
+    grads = [p.grad for p in parameters if p.grad is not None]
+    if not grads:
+        return 0.0
+    if norm_type == np.inf:
+        total = max(np.abs(g).max(initial=0) for g in grads)
+    else:
+        total = sum(np.abs(g.astype(float)) ** norm_type for g in grads).sum() ** (
+            1 / norm_type
+        )
+    if total > max_norm:
+        scale = max_norm / (total + 1e-12)
+        for grad in grads:
+            grad *= scale
+    return total

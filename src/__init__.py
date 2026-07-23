@@ -26,7 +26,7 @@ from .nn import (
     Sequential,
 )
 from .functional import avg_pool2d, conv2d, max_pool2d
-from .optim import Adam, RMSprop, SGD
+from .optim import Adagrad, Adam, AdamW, RMSprop, SGD, clip_grad_norm_
 
 __all__ = [
     "Tensor",
@@ -55,5 +55,8 @@ __all__ = [
     "BatchNorm",
     "SGD",
     "Adam",
+    "AdamW",
+    "Adagrad",
     "RMSprop",
+    "clip_grad_norm_",
 ]

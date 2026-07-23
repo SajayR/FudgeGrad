@@ -2,12 +2,14 @@ import unittest
 import numpy as np
 from src import (
     Adam,
+    AdamW,
     BatchNorm,
     Embedding,
     Tensor,
     binary_cross_entropy_with_logits,
     cat,
     conv2d,
+    clip_grad_norm_,
     gradcheck,
     max_pool2d,
     mse_loss,
@@ -105,6 +107,14 @@ class TestAutograd(unittest.TestCase):
         x.mean().backward()
         np.testing.assert_allclose(x.grad, [0.5, 0.5])
         self.assertTrue(gradcheck(lambda a: a.mean(), (x,)))
+
+    def test_adamw_and_gradient_clipping(self):
+        weight = Tensor([1.0], requires_grad=True)
+        weight.grad[...] = 4
+        self.assertEqual(clip_grad_norm_([weight], 1), 4)
+        np.testing.assert_allclose(weight.grad, [1])
+        AdamW([weight], lr=0.1, weight_decay=0.1).step()
+        self.assertLess(weight.item(), 1)
 
 
 if __name__ == "__main__":
