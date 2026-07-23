@@ -18,6 +18,9 @@ from src import (
     one_hot,
     pad,
     Linear,
+    ModuleList,
+    Parameter,
+    ParameterList,
     ReLU,
     Sequential,
 )
@@ -146,6 +149,12 @@ class TestAutograd(unittest.TestCase):
         self.assertEqual([part.shape for part in parts], [(2, 1), (2, 2)])
         self.assertTrue(gradcheck(lambda a: a.astype(np.float32).sum(), (x,)))
         self.assertEqual(len(x.unbind(1)), 3)
+
+    def test_dynamic_module_and_parameter_containers(self):
+        layers = ModuleList().append(Linear(2, 3, seed=0)).append(Linear(3, 1, seed=1))
+        self.assertEqual(len(list(layers.parameters())), 4)
+        parameters = ParameterList([Parameter([1.0])])
+        self.assertEqual(len(list(parameters.parameters())), 1)
 
     def test_activation_and_loss_modules(self):
         model = Sequential(Linear(2, 3, seed=0), ReLU(), Linear(3, 2, seed=1))

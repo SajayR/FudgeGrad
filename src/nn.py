@@ -138,6 +138,53 @@ class Sequential(Module):
         return x
 
 
+class ModuleList(Module):
+    def __init__(self, modules=()):
+        super().__init__()
+        self.layers = list(modules)
+
+    def __len__(self):
+        return len(self.layers)
+
+    def __iter__(self):
+        return iter(self.layers)
+
+    def __getitem__(self, index):
+        return self.layers[index]
+
+    def append(self, module):
+        if not isinstance(module, Module):
+            raise TypeError("ModuleList only accepts Module instances")
+        self.layers.append(module)
+        return self
+
+    def extend(self, modules):
+        for module in modules:
+            self.append(module)
+        return self
+
+
+class ParameterList(Module):
+    def __init__(self, parameters=()):
+        super().__init__()
+        self.parameters_list = list(parameters)
+
+    def __len__(self):
+        return len(self.parameters_list)
+
+    def __iter__(self):
+        return iter(self.parameters_list)
+
+    def __getitem__(self, index):
+        return self.parameters_list[index]
+
+    def append(self, parameter):
+        if not isinstance(parameter, Parameter):
+            raise TypeError("ParameterList only accepts Parameter instances")
+        self.parameters_list.append(parameter)
+        return self
+
+
 class Flatten(Module):
     def __init__(self, start_dim=1, end_dim=-1):
         super().__init__()
