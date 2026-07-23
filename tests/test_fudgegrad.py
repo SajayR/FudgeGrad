@@ -28,6 +28,7 @@ from src import (
     Parameter,
     ParameterList,
     ReLU,
+    RNN,
     Sequential,
 )
 
@@ -197,6 +198,13 @@ class TestAutograd(unittest.TestCase):
         scheduler = CosineAnnealingLR(optimizer, 2, eta_min=0)
         self.assertAlmostEqual(scheduler.step(), 0.5)
         self.assertAlmostEqual(scheduler.step(), 0)
+
+    def test_recurrent_network(self):
+        network = RNN(2, 3, seed=0)
+        output, hidden = network(Tensor(np.random.randn(2, 4, 2)))
+        self.assertEqual(output.shape, (2, 4, 3))
+        output.sum().backward()
+        self.assertEqual(hidden.shape, (2, 3))
 
     def test_activation_and_loss_modules(self):
         model = Sequential(Linear(2, 3, seed=0), ReLU(), Linear(3, 2, seed=1))

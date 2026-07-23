@@ -8,6 +8,7 @@ from .tensor import (
     huber_loss,
     l1_loss,
     mse_loss,
+    stack,
 )
 from .functional import (
     avg_pool1d,
@@ -278,6 +279,40 @@ class MultiheadAttention(Module):
         )
         attended = attended.permute(0, 2, 1, 3).reshape(query.shape)
         return self.out_proj(attended)
+
+
+class RNN(Module):
+    def __init__(
+        self, input_size, hidden_size, nonlinearity="tanh", bias=True, seed=None
+    ):
+        if nonlinearity not in {"tanh", "relu"}:
+            raise ValueError("nonlinearity must be 'tanh' or 'relu'")
+        super().__init__()
+        rng = np.random.default_rng(seed)
+        bound = 1 / np.sqrt(hidden_size)
+        self.hidden_size, self.nonlinearity = hidden_size, nonlinearity
+        self.weight_ih = Parameter(
+            rng.uniform(-bound, bound, (hidden_size, input_size))
+        )
+        self.weight_hh = Parameter(
+            rng.uniform(-bound, bound, (hidden_size, hidden_size))
+        )
+        self.bias = Parameter(np.zeros(hidden_size)) if bias else None
+
+    def forward(self, x, hidden=None):
+        if x.ndim != 3:
+            raise ValueError("RNN expects input shaped (N, L, C)")
+        hidden = (
+            Tensor.zeros((x.shape[0], self.hidden_size)) if hidden is None else hidden
+        )
+        states = []
+        for step in range(x.shape[1]):
+            hidden = x[:, step] @ self.weight_ih.T + hidden @ self.weight_hh.T
+            if self.bias is not None:
+                hidden = hidden + self.bias
+            hidden = hidden.tanh() if self.nonlinearity == "tanh" else hidden.relu()
+            states.append(hidden)
+        return stack(states, axis=1), hidden
 
 
 class Embedding(Module):
