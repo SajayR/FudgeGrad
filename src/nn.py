@@ -16,6 +16,7 @@ from .functional import (
     conv2d,
     max_pool1d,
     max_pool2d,
+    scaled_dot_product_attention,
 )
 
 
@@ -244,6 +245,39 @@ class Softmax(Module):
 
     def forward(self, x):
         return x.softmax(self.axis)
+
+
+class MultiheadAttention(Module):
+    def __init__(self, embed_dim, num_heads, bias=True, seed=None):
+        if embed_dim % num_heads:
+            raise ValueError("embed_dim must be divisible by num_heads")
+        super().__init__()
+        self.embed_dim, self.num_heads = embed_dim, num_heads
+        seeds = np.random.default_rng(seed).integers(2**32, size=4)
+        self.q_proj = Linear(embed_dim, embed_dim, bias, int(seeds[0]))
+        self.k_proj = Linear(embed_dim, embed_dim, bias, int(seeds[1]))
+        self.v_proj = Linear(embed_dim, embed_dim, bias, int(seeds[2]))
+        self.out_proj = Linear(embed_dim, embed_dim, bias, int(seeds[3]))
+
+    def forward(self, query, key=None, value=None, mask=None):
+        key = query if key is None else key
+        value = key if value is None else value
+        if query.ndim != 3 or key.ndim != 3 or value.ndim != 3:
+            raise ValueError("MultiheadAttention expects tensors shaped (N, L, E)")
+        head_dim = self.embed_dim // self.num_heads
+
+        def heads(x, projection):
+            x = projection(x).reshape(x.shape[0], x.shape[1], self.num_heads, head_dim)
+            return x.permute(0, 2, 1, 3)
+
+        attended = scaled_dot_product_attention(
+            heads(query, self.q_proj),
+            heads(key, self.k_proj),
+            heads(value, self.v_proj),
+            mask,
+        )
+        attended = attended.permute(0, 2, 1, 3).reshape(query.shape)
+        return self.out_proj(attended)
 
 
 class Embedding(Module):

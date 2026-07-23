@@ -23,6 +23,7 @@ from src import (
     scaled_dot_product_attention,
     Linear,
     ModuleList,
+    MultiheadAttention,
     Parameter,
     ParameterList,
     ReLU,
@@ -183,6 +184,12 @@ class TestAutograd(unittest.TestCase):
                 lambda a, b, c: scaled_dot_product_attention(a, b, c).sum(), (q, k, v)
             )
         )
+
+    def test_multihead_attention(self):
+        layer = MultiheadAttention(4, 2, seed=0)
+        x = Tensor(np.random.randn(2, 3, 4))
+        layer(x).sum().backward()
+        self.assertTrue(all(p.grad is not None for p in layer.parameters()))
 
     def test_activation_and_loss_modules(self):
         model = Sequential(Linear(2, 3, seed=0), ReLU(), Linear(3, 2, seed=1))
