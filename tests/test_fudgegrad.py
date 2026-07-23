@@ -50,5 +50,9 @@ class TestAutograd(unittest.TestCase):
     def test_logits_bce(self):
         x = Tensor([-2., 0., 2.], requires_grad=True); self.assertTrue(gradcheck(lambda a: binary_cross_entropy_with_logits(a, [0, 1, 1]), (x,)))
 
+    def test_stable_sigmoid(self):
+        x = Tensor([-1000., 1000.], requires_grad=True); x.sigmoid().sum().backward()
+        np.testing.assert_allclose(x.grad, [0, 0])
+
 
 if __name__ == "__main__": unittest.main()

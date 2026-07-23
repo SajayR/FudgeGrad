@@ -546,7 +546,7 @@ class Tensor:
         return self._unary(lambda x: np.where(x > 0, x, alpha * np.expm1(x)), lambda x, y: np.where(x > 0, 1, y + alpha), "elu")
 
     def softplus(self):
-        return self._unary(lambda x: np.logaddexp(0, x), lambda x, _: 1 / (1 + np.exp(-x)), "softplus")
+        return self._unary(lambda x: np.logaddexp(0, x), lambda x, _: np.exp(-np.logaddexp(0, -x)), "softplus")
 
     def gelu(self):
         c, k = np.sqrt(2 / np.pi), 0.044715
@@ -555,7 +555,7 @@ class Tensor:
     def swish(self): return self * self.sigmoid()
 
     def sigmoid(self):
-        data = 1 / (1 + np.exp(-self.data))
+        data = np.exp(-np.logaddexp(0, -self.data))
         out = Tensor(data, requires_grad=self.requires_grad, _children=(self,), _op="sigmoid")
 
         def _backward():
