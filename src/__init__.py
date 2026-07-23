@@ -7,6 +7,7 @@ from .tensor import (
     gradcheck,
     mse_loss,
     no_grad,
+    one_hot,
     enable_grad,
     is_grad_enabled,
     stack,
@@ -37,7 +38,7 @@ from .nn import (
     GELU,
     Identity,
 )
-from .functional import avg_pool2d, conv2d, max_pool2d
+from .functional import avg_pool2d, conv2d, max_pool2d, pad
 from .optim import Adagrad, Adam, AdamW, RMSprop, SGD, clip_grad_norm_
 
 __all__ = [
@@ -46,6 +47,7 @@ __all__ = [
     "enable_grad",
     "is_grad_enabled",
     "where",
+    "one_hot",
     "stack",
     "cat",
     "mse_loss",
@@ -56,6 +58,7 @@ __all__ = [
     "conv2d",
     "max_pool2d",
     "avg_pool2d",
+    "pad",
     "Module",
     "Parameter",
     "Linear",

@@ -997,10 +997,31 @@ class Tensor:
         return Tensor(np.ones(shape, dtype=dtype), requires_grad=requires_grad)
 
     @staticmethod
+    def full(shape, fill_value, *, dtype=None, requires_grad=False):
+        return Tensor(
+            np.full(shape, fill_value, dtype=dtype), requires_grad=requires_grad
+        )
+
+    @staticmethod
     def randn(shape, *, dtype=None, requires_grad=False, seed=None):
         rng = np.random.default_rng(seed)
         return Tensor(
             rng.standard_normal(shape, dtype=dtype), requires_grad=requires_grad
+        )
+
+    @staticmethod
+    def rand(shape, *, dtype=None, requires_grad=False, seed=None):
+        data = np.random.default_rng(seed).random(shape)
+        return Tensor(
+            data if dtype is None else data.astype(dtype), requires_grad=requires_grad
+        )
+
+    @staticmethod
+    def arange(start, stop=None, step=1, *, dtype=None, requires_grad=False):
+        if stop is None:
+            start, stop = 0, start
+        return Tensor(
+            np.arange(start, stop, step, dtype=dtype), requires_grad=requires_grad
         )
 
     @staticmethod
@@ -1028,6 +1049,11 @@ def where(condition, x, y):
 
     out._backward = _backward
     return out
+
+
+def one_hot(indices, num_classes, dtype=float):
+    data = indices.data if isinstance(indices, Tensor) else indices
+    return Tensor(np.eye(num_classes, dtype=dtype)[np.asarray(data, dtype=int)])
 
 
 def stack(tensors: Sequence[Tensor], axis=0):

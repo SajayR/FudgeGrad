@@ -15,6 +15,8 @@ from src import (
     max_pool2d,
     mse_loss,
     no_grad,
+    one_hot,
+    pad,
     Linear,
     ReLU,
     Sequential,
@@ -131,6 +133,12 @@ class TestAutograd(unittest.TestCase):
         x = Tensor([1.0, 2.0, 3.0], requires_grad=True)
         self.assertTrue(gradcheck(lambda a: a.cumsum().sum(), (x,)))
         self.assertTrue(gradcheck(lambda a: (2**a).sum(), (x,)))
+
+    def test_padding_and_factory_helpers(self):
+        x = Tensor([[1.0, 2.0]], requires_grad=True)
+        self.assertTrue(gradcheck(lambda a: pad(a, ((1, 2), (2, 1))).sum(), (x,)))
+        np.testing.assert_array_equal(one_hot([0, 2], 3).data, [[1, 0, 0], [0, 0, 1]])
+        np.testing.assert_array_equal(Tensor.arange(3).data, [0, 1, 2])
 
     def test_activation_and_loss_modules(self):
         model = Sequential(Linear(2, 3, seed=0), ReLU(), Linear(3, 2, seed=1))

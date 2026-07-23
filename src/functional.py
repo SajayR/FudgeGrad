@@ -6,6 +6,33 @@ def _pair(x):
     return (x, x) if isinstance(x, int) else tuple(x)
 
 
+def pad(x, pad_width, value=0):
+    x = x if isinstance(x, Tensor) else Tensor(x)
+    if isinstance(pad_width, int):
+        pad_width = ((pad_width, pad_width),) * x.ndim
+    else:
+        pad_width = tuple(
+            (width, width) if isinstance(width, int) else tuple(width)
+            for width in pad_width
+        )
+    if len(pad_width) != x.ndim:
+        raise ValueError("pad_width must specify every dimension")
+    data = np.pad(x.data, pad_width, constant_values=value)
+    out = Tensor(data, requires_grad=x.requires_grad, _children=(x,), _op="pad")
+
+    def _backward():
+        if out.grad is None or not x.requires_grad:
+            return
+        source = tuple(
+            slice(before, before + size)
+            for (before, _), size in zip(pad_width, x.shape)
+        )
+        x.grad += out.grad[source]
+
+    out._backward = _backward
+    return out
+
+
 def conv2d(x, weight, bias=None, stride=1, padding=0):
     x = x if isinstance(x, Tensor) else Tensor(x)
     weight = weight if isinstance(weight, Tensor) else Tensor(weight)
